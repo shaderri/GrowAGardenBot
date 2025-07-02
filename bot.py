@@ -1,4 +1,3 @@
-```python
 # bot.py
 import os
 import threading
