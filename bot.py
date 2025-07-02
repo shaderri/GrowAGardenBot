@@ -2,10 +2,10 @@
 import os
 import threading
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from flask import Flask
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # Загрузим переменные окружения
@@ -76,17 +76,8 @@ def get_keyboard():
         [InlineKeyboardButton("📦 Показать стоки", callback_data="show_stock")]
     ])
 
-# Команда /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Привет! Нажми кнопку, чтобы получить текущие стоки:",
-        reply_markup=get_keyboard()
-    )
-
-# Нажатие кнопки
-async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-
+# Функция формирования и отправки стоков
+async def send_stock_message(chat_id, context: ContextTypes.DEFAULT_TYPE):
     # Запрос данных по категориям
     stocks = {
         "seeds_stock":    fetch_stock("seeds_stock"),
@@ -95,13 +86,31 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "egg_stock":      fetch_stock("egg_stock"),
     }
 
-    # Сборка сообщения
-    now = datetime.utcnow().strftime("%d.%m.%Y %H:%M:%S UTC")
-    text = f"🕒 {now}\n\n📊 *Стоки Grow a Garden:*\n\n"
+    # Время UTC+3
+    now = datetime.utcnow() + timedelta(hours=3)
+    timestamp = now.strftime("%d.%m.%Y %H:%M:%S UTC+3")
+
+    text = f"🕒 {timestamp}\n\n📊 *Стоки Grow a Garden:*\n\n"
     for category, items in stocks.items():
         text += format_block(category, CATEGORY_EMOJI.get(category, "📦"), items)
 
-    await update.callback_query.message.reply_markdown(text)
+    await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+
+# Команда /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Привет! Нажми кнопку или введи /stock, чтобы получить текущие стоки:",
+        reply_markup=get_keyboard()
+    )
+
+# Команда /stock
+async def stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_stock_message(update.effective_chat.id, context)
+
+# Нажатие кнопки
+async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await send_stock_message(update.callback_query.message.chat_id, context)
 
 # Flask для ping
 app = Flask(__name__)
@@ -117,7 +126,18 @@ if __name__ == "__main__":
     ).start()
 
     app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Регистрация команд в меню Telegram
+    commands = [
+        BotCommand("start", "Начать"),
+        BotCommand("stock", "Показать стоки Grow a Garden")
+    ]
+    app_bot.bot.set_my_commands(commands)
+
+    # Хендлеры
     app_bot.add_handler(CommandHandler("start", start))
+    app_bot.add_handler(CommandHandler("stock", stock))
     app_bot.add_handler(CallbackQueryHandler(on_button, pattern="show_stock"))
+
     print("✅ Bot is running…")
     app_bot.run_polling()
