@@ -77,7 +77,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    resp = requests.get(API_URL)
+    # добавляем cookie для авторизации на Gamersberg
+    cookie = os.getenv("API_COOKIE")  # установите в .env: API_COOKIE=session_start=...
+    headers = {"Cookie": cookie}
+    resp = requests.get(API_URL, headers=headers)
     data = resp.json().get("data", [])
     if not data:
         await update.callback_query.message.reply_text("⚠️ Данные отсутствуют")
