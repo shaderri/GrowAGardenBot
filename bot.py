@@ -1,3 +1,4 @@
+```python
 # bot.py
 import os
 import threading
@@ -32,13 +33,21 @@ CATEGORY_EMOJI = {
 # Эмодзи по названиям предметов
 ITEM_EMOJI = {
     # Seeds
-    "Carrot": "🥕", "Strawberry": "🍓", "Blueberry": "🫐", "Tomato": "🍅",
-    "Banana": "🍌",
+    "Feijoa": "🥝", "Kiwi": "🥝", "Avocado": "🥑", "Sugar Apple": "🍏", "Tomato": "🍅",
+    "Bell Pepper": "🌶️", "Pitcher Plant": "🌱", "Prickly Pear": "🌵", "Cauliflower": "🥦",
+    "Blueberry": "🫐", "Carrot": "🥕", "Loquat": "🍑", "Green Apple": "🍏", "Strawberry": "🍓",
+    "Watermelon": "🍉", "Banana": "🍌", "Rafflesia": "🌺", "Pineapple": "🍍",
+    # Cosmetic
+    "Green Tractor": "🚜", "Large Wood Flooring": "🪵", "Sign Crate": "📦", "Small Wood Table": "🪑",
+    "Large Path Tile": "🛤️", "Medium Path Tile": "⬛", "Wood Fence": "🪵", "Axe Stump": "🪨", "Shovel": "🪓",
     # Gear
-    "Harvest Tool": "🧲", "Trowel": "⛏️", "Cleaning Spray": "🧴",
-    "Recall Wrench": "🔧", "Favorite Tool": "❤️", "Watering Can": "🚿",
+    "Advanced Sprinkler": "💦", "Master Sprinkler": "💧", "Basic Sprinkler": "🌦️", "Godly Sprinkler": "⚡",
+    "Trowel": "⛏️", "Harvest Tool": "🧲", "Cleaning Spray": "🧴", "Recall Wrench": "🔧",
+    "Favorite Tool": "❤️", "Watering Can": "🚿", "Magnifying Glass": "🔍", "Tanning Mirror": "🪞", "Friendship Pot": "🌻",
     # Eggs
-    "Common Egg": "🥚"
+    "Common Egg": "🥚", "Common Summer Egg": "☀️🥚", "Paradise Egg": "🐣",
+    # Weather
+    # (handled separately)
 }
 
 # Функция запроса стока по типу
@@ -78,10 +87,12 @@ def format_block(title: str, emoji: str, items: list) -> str:
     return text + "\n"
 
 # Форматирование погоды
+from zoneinfo import ZoneInfo
+
 def format_weather(item: dict) -> str:
     if not item:
-        return "**☁️ Погода отсутствует**"
-    # Парсим дату UTC и конвертируем в MSK
+        return "**☁️ Weather отсутствует**"
+    # Парсим дату UTC из API и конвертируем в MSK
     iso_date = item.get("date")
     try:
         dt_utc = datetime.fromisoformat(iso_date.replace("Z", "+00:00"))
@@ -90,69 +101,10 @@ def format_weather(item: dict) -> str:
     except Exception:
         time_msk = iso_date
     desc = item.get("display_name", "?")
-    mult = item.get("multiplier", "?")
-    # Собираем текст построчно
-    lines = []
-    lines.append("**━ ☁️ Weather ━**")
-    lines.append(f"   🕒 {time_msk}")
-    lines.append(f"   🌡️ {desc}: x{mult}")
-    return "\n".join(lines)
-
-
-# Клавиатура
-def get_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 Показать стоки", callback_data="show_stock")],
-        [InlineKeyboardButton("☁️ Показать погоду", callback_data="show_weather")]
-    ])
-
-# Обработчики Telegram
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Привет! Выбери действие:",
-        reply_markup=get_keyboard()
-    )
-
-async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    # Собираем стоки
-    stocks = {
-        "seeds_stock":    fetch_stock("seeds_stock"),
-        "cosmetic_stock": fetch_stock("cosmetic_stock"),
-        "gear_stock":     fetch_stock("gear_stock"),
-        "egg_stock":      fetch_stock("egg_stock"),
-    }
-    now = datetime.utcnow().strftime("**🕒 %d.%m.%Y %H:%M:%S UTC**\n\n")
-    text = now + "**📊 Стоки Grow a Garden:**\n\n"
-    for key, items in stocks.items():
-        text += format_block(key, CATEGORY_EMOJI.get(key, "📦"), items)
-    await update.callback_query.message.reply_markdown(text)
-
-async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    data = fetch_weather()
-    item = data[0] if data else None
-    text = format_weather(item)
-    await update.callback_query.message.reply_markdown(text)
-
-# Flask для healthcheck
-app = Flask(__name__)
-@app.route("/")
-def healthcheck():
-    return "Bot is alive!"
-
-# Запуск
-if __name__ == "__main__":
-    threading.Thread(
-        target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000))),
-        daemon=True
-    ).start()
-
-    app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CallbackQueryHandler(handle_stock,   pattern="show_stock"))
-    app_bot.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
-    # Обработчик команды /weather
-    app_bot.add_handler(CommandHandler("weather", handle_weather))
-    print("✅ Bot is running…")
-    app_bot.run_polling()
+    # Формируем текст построчно
+    lines = [
+        "**━ ☁️ Weather ━**",
+        f"   🕒 {time_msk}",
+        f"   🌡️ {desc}"
+    ]
+return "\n".join(lines)
