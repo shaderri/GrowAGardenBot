@@ -27,26 +27,36 @@ CATEGORY_EMOJI = {
 }
 ITEM_EMOJI = {
     # Seeds
-    "Carrot":"🥕","Strawberry":"🍓","Blueberry":"🫐","Tomato":"🍅",
-    "Banana":"🍌",
+    "Carrot":"🥕","Strawberry":"🍓","Blueberry":"🫐","Tomato":"🍅","Banana":"🍌",
     # Gear
-    "Harvest Tool":"🧲","Trowel":"⛏️","Cleaning Spray":"🧴",
-    "Recall Wrench":"🔧","Favorite Tool":"❤️","Watering Can":"🚿",
+    "Harvest Tool":"🧲","Trowel":"⛏️","Cleaning Spray":"🧴","Recall Wrench":"🔧",
+    "Favorite Tool":"❤️","Watering Can":"🚿",
     # Eggs
     "Common Egg":"🥚","Common Summer Egg":"☀️🥚","Paradise Egg":"🐣"
 }
 
 # 4) Fetch stock
 def fetch_stock(stock_type: str):
-    params = {"select":"*","type":f"eq.{stock_type}","active":"eq.true","order":"created_at.desc"}
-    r = requests.get(BASE_URL, headers=HEADERS, params=params)
-    return r.json() if r.ok else []
+    params = {
+        "select": "*",
+        "type": f"eq.{stock_type}",
+        "active": "eq.true",
+        "order": "created_at.desc"
+    }
+    resp = requests.get(BASE_URL, headers=HEADERS, params=params)
+    return resp.json() if resp.ok else []
 
 # 5) Fetch weather
 def fetch_weather():
-    params = {"select":"*","type":"eq.weather","active":"eq.true","order":"date.desc","limit":1}
-    r = requests.get(BASE_URL, headers=HEADERS, params=params)
-    return r.json() if r.ok else []
+    params = {
+        "select": "*",
+        "type": "eq.weather",
+        "active": "eq.true",
+        "order": "date.desc",
+        "limit": 1
+    }
+    resp = requests.get(BASE_URL, headers=HEADERS, params=params)
+    return resp.json() if resp.ok else []
 
 # 6) Format stock block
 def format_block(key: str, emoji: str, items: list) -> str:
@@ -91,40 +101,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
      await update.message.reply_text("Привет! Выбери действие:", reply_markup=get_keyboard())
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-     # ответ на кнопку или команду
+     # handle callback or command
      if update.callback_query:
          await update.callback_query.answer()
-         reply = update.callback_query.message
+         target = update.callback_query.message
      else:
-         reply = update.message
+         target = update.message
      data = {k: fetch_stock(k) for k in ["seeds_stock","cosmetic_stock","gear_stock","egg_stock"]}
-     now = datetime.utcnow().strftime("**🕒 %d.%m.%Y %H:%M:%S UTC**")
-     text = now + """**📊 Стоки Grow a Garden:**"""
-
+     now = datetime.utcnow().strftime("**🕒 %d.%m.%Y %H:%M:%S UTC**\n\n")
+     text = now + "**📊 Стоки Grow a Garden:**\n\n"
      for k, items in data.items():
          text += format_block(k, CATEGORY_EMOJI.get(k, "📦"), items)
-     await reply.reply_markdown(text)
+     await target.reply_markdown(text)
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
-     # ответ на кнопку или команду
      if update.callback_query:
          await update.callback_query.answer()
-         reply = update.callback_query.message
+         target = update.callback_query.message
      else:
-         reply = update.message
+         target = update.message
      arr = fetch_weather()
      item = arr[0] if arr else None
      text = format_weather(item)
-     await reply.reply_markdown(text)
+     await target.reply_markdown(text)
 
 # 10) Flask healthcheck
 app = Flask(__name__)
 @app.route("/")
-def healthcheck(): return "Bot is alive!"
+def healthcheck():
+     return "Bot is alive!"
 
 # 11) Main
 if __name__ == "__main__":
-     threading.Thread(target=lambda: app.run(host="0.0.0.0",port=int(os.getenv("PORT",10000))),daemon=True).start()
+     threading.Thread(
+         target=lambda: app.run(host="0.0.0.0", port=int(os.getenv("PORT",10000))), daemon=True
+     ).start()
      bot = ApplicationBuilder().token(BOT_TOKEN).build()
      bot.add_handler(CommandHandler("start", start))
      bot.add_handler(CommandHandler("stock", handle_stock))
@@ -133,38 +144,3 @@ if __name__ == "__main__":
      bot.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
      print("✅ Bot is running…")
      bot.run_polling()
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Select an option:", reply_markup=get_keyboard())
-
-async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    data = {k: fetch_stock(k) for k in ["seeds_stock","cosmetic_stock","gear_stock","egg_stock"]}
-    now = datetime.utcnow().strftime("**🕒 %d.%m.%Y %H:%M:%S UTC**\n\n")
-    text = now + "**📊 Grow a Garden Stock:**\n\n"
-    for k, items in data.items():
-        text += format_block(k, CATEGORY_EMOJI.get(k, "📦"), items)
-    await update.callback_query.message.reply_markdown(text)
-
-async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    arr = fetch_weather()
-    item = arr[0] if arr else None
-    text = format_weather(item)
-    await update.callback_query.message.reply_markdown(text)
-
-# 10) Flask healthcheck
-app = Flask(__name__)
-@app.route("/")
-def healthcheck(): return "Bot is alive!"
-
-# 11) Main
-if __name__ == "__main__":
-    threading.Thread(target=lambda: app.run(host="0.0.0.0",port=int(os.getenv("PORT",10000))),daemon=True).start()
-    bot = ApplicationBuilder().token(BOT_TOKEN).build()
-    bot.add_handler(CommandHandler("start", start))
-    bot.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
-    bot.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
-    bot.add_handler(CommandHandler("weather", handle_weather))
-    print("✅ Bot is running…")
-    bot.run_polling()
