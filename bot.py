@@ -1,3 +1,4 @@
+# bot.py
 import os
 import threading
 import requests
@@ -77,12 +78,10 @@ def format_block(title: str, emoji: str, items: list) -> str:
     return text + "\n"
 
 # Форматирование погоды
-from zoneinfo import ZoneInfo
-
 def format_weather(item: dict) -> str:
     if not item:
         return "**☁️ Погода отсутствует**"
-    # Парсим дату UTC из API и конвертируем в MSK
+    # Парсим дату UTC и конвертируем в MSK
     iso_date = item.get("date")
     try:
         dt_utc = datetime.fromisoformat(iso_date.replace("Z", "+00:00"))
@@ -92,9 +91,13 @@ def format_weather(item: dict) -> str:
         time_msk = iso_date
     desc = item.get("display_name", "?")
     mult = item.get("multiplier", "?")
-    return f"**━ ☁️ Weather ━**
-   🕒 {time_msk}
-   🌡️ {desc}: x{mult}
+    # Собираем текст построчно
+    lines = []
+    lines.append("**━ ☁️ Weather ━**")
+    lines.append(f"   🕒 {time_msk}")
+    lines.append(f"   🌡️ {desc}: x{mult}")
+    return "\n".join(lines)
+
 
 # Клавиатура
 def get_keyboard():
