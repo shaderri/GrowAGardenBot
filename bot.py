@@ -81,12 +81,59 @@ def format_weather(item: dict) -> str:
 
 # 8) Keyboard
 def get_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 Show Stock", callback_data="show_stock")],
-        [InlineKeyboardButton("☁️ Weather", callback_data="show_weather")]
-    ])
+     return InlineKeyboardMarkup([
+         [InlineKeyboardButton("📦 Показать стоки", callback_data="show_stock")],
+         [InlineKeyboardButton("☁️ Показать погоду", callback_data="show_weather")]
+     ])
 
 # 9) Handlers
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+     await update.message.reply_text("Привет! Выбери действие:", reply_markup=get_keyboard())
+
+async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+     # ответ на кнопку или команду
+     if update.callback_query:
+         await update.callback_query.answer()
+         reply = update.callback_query.message
+     else:
+         reply = update.message
+     data = {k: fetch_stock(k) for k in ["seeds_stock","cosmetic_stock","gear_stock","egg_stock"]}
+     now = datetime.utcnow().strftime("**🕒 %d.%m.%Y %H:%M:%S UTC**")
+     text = now + """**📊 Стоки Grow a Garden:**"""
+
+     for k, items in data.items():
+         text += format_block(k, CATEGORY_EMOJI.get(k, "📦"), items)
+     await reply.reply_markdown(text)
+
+async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
+     # ответ на кнопку или команду
+     if update.callback_query:
+         await update.callback_query.answer()
+         reply = update.callback_query.message
+     else:
+         reply = update.message
+     arr = fetch_weather()
+     item = arr[0] if arr else None
+     text = format_weather(item)
+     await reply.reply_markdown(text)
+
+# 10) Flask healthcheck
+app = Flask(__name__)
+@app.route("/")
+def healthcheck(): return "Bot is alive!"
+
+# 11) Main
+if __name__ == "__main__":
+     threading.Thread(target=lambda: app.run(host="0.0.0.0",port=int(os.getenv("PORT",10000))),daemon=True).start()
+     bot = ApplicationBuilder().token(BOT_TOKEN).build()
+     bot.add_handler(CommandHandler("start", start))
+     bot.add_handler(CommandHandler("stock", handle_stock))
+     bot.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
+     bot.add_handler(CommandHandler("weather", handle_weather))
+     bot.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
+     print("✅ Bot is running…")
+     bot.run_polling()
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Select an option:", reply_markup=get_keyboard())
 
