@@ -8,12 +8,17 @@ from flask import Flask
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# Загрузим переменные окружения
+# 1) Загрузим переменные окружения
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_KEY = os.getenv("API_KEY")  # твой Supabase API key
 
-# Основной API URL
-API_URL = "https://www.gamersberg.com/api/grow-a-garden/stock"
+# 2) Старый Supabase REST endpoint Arcaiuz
+BASE_URL = "https://vextbzatpprnksyutbcp.supabase.co/rest/v1/growagarden_stock"
+HEADERS = {
+    "apikey": API_KEY,
+    "Authorization": f"Bearer {API_KEY}"
+}
 
 # Эмодзи по категориям и предметам
 CATEGORY_EMOJI = {"seeds":"🌱","cosmetic":"💎","gear":"🧰","event":"🌴","eggs":"🥚"}
@@ -30,85 +35,79 @@ ITEM_EMOJI = {
     "Advanced Sprinkler":"💦","Master Sprinkler":"💧","Basic Sprinkler":"🌦️","Godly Sprinkler":"⚡",
     "Trowel":"⛏️","Harvest Tool":"🧲","Cleaning Spray":"🧴","Recall Wrench":"🔧",
     "Favorite Tool":"❤️","Watering Can":"🚿","Magnifying Glass":"🔍","Tanning Mirror":"🪞","Friendship Pot":"🌻",
-    # Event
-    "Hamster":"🐹","Summer Seed Pack":"🌞","Oasis Crate":"🏝️","Traveler's Fruit":"✈️",
-    "Delphinium":"🌸","Oasis Egg":"🥚","Lily of the Valley":"💐","Mutation Spray Burnt":"🔥",
     # Eggs
     "Common Egg":"🥚"
 }
 
-# Форматирование секций
-def format_dict_block(name: str, data: dict) -> str:
-    filtered = {k: v for k, v in data.items() if int(v) > 0}
-    if not filtered:
+# 4) Функция запроса стока по типу
+def fetch_stock(stock_type: str):
+    params = {
+        "select": "*",
+        "type": f"eq.{stock_type}",
+        "active": "eq.true",
+        "order": "created_at.desc"
+    }
+    resp = requests.get(BASE_URL, headers=HEADERS, params=params)
+    return resp.json() if resp.ok else []
+
+# 5) Форматирование блока
+def format_block(title: str, emoji: str, items: list) -> str:
+    if not items:
         return ""
-    title = "Summer Stock" if name == "event" else f"{name.capitalize()} Stock"
-    text = f"━ {CATEGORY_EMOJI.get(name)} {title} ━\n"
-    for item, qty in filtered.items():
-        emoji = ITEM_EMOJI.get(item, "•")
-        text += f"   {emoji} {item}: x{qty}\n"
+    # Преобразуем ключ в читаемый заголовок
+    header = title.replace("_", " ").title()
+    text = f"━ {emoji} {header} ━\n"
+    for it in items:
+        name = it.get("display_name")
+        qty = it.get("multiplier")
+        em = ITEM_EMOJI.get(name, "•")
+        text += f"   {em} {name}: x{qty}\n"
     return text + "\n"
 
-def format_eggs_block(eggs: list) -> str:
-    filtered = [e for e in eggs if e.get("name") != "Location" and int(e.get("quantity", 0)) > 0]
-    if not filtered:
-        return ""
-    text = f"━ {CATEGORY_EMOJI.get('eggs')} Egg Stock ━\n"
-    for egg in filtered:
-        name = egg.get("name")
-        qty = egg.get("quantity")
-        emoji = ITEM_EMOJI.get(name, "🥚")
-        text += f"   {emoji} {name}: x{qty}\n"
-    return text + "\n"
-
-# Клавиатура для Telegram
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
+# 6) Клавиатура Telegram
 def get_keyboard():
-    btn = InlineKeyboardButton("📦 Показать стоки", callback_data="show_stock")
-    return InlineKeyboardMarkup([[btn]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("📦 Показать стоки", callback_data="show_stock")]])
 
-# Обработчики Telegram
+# 7) Обработчики команд
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привет! Нажми кнопку, чтобы получить стоки Grow a Garden:",
+        "Привет! Нажми кнопку, чтобы получить текущие стоки:",
         reply_markup=get_keyboard()
     )
 
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    # добавляем cookie для авторизации на Gamersberg
-    cookie = os.getenv("API_COOKIE")  # установите в .env: API_COOKIE=session_start=...
-    headers = {"Cookie": cookie}
-    resp = requests.get(API_URL, headers=headers)
-    data = resp.json().get("data", [])
-    if not data:
-        await update.callback_query.message.reply_text("⚠️ Данные отсутствуют")
-        return
-    info = data[0]
-    ts = int(info.get("timestamp", 0))
-    now = datetime.fromtimestamp(ts).strftime("%d.%m.%Y %H:%M:%S")
+    # Получаем четыре категории
+    seeds    = fetch_stock("seeds_stock")
+    cosmetic = fetch_stock("cosmetic_stock")
+    gear     = fetch_stock("gear_stock")
+    egg      = fetch_stock("egg_stock")
+
+    now = datetime.utcnow().strftime("%d.%m.%Y %H:%M:%S UTC")
     text = f"🕒 {now}\n\n📊 *Стоки Grow a Garden:*\n\n"
-    text += format_dict_block("seeds", info.get("seeds", {}))
-    text += format_dict_block("cosmetic", info.get("cosmetic", {}))
-    text += format_dict_block("gear", info.get("gear", {}))
-    text += format_dict_block("event", info.get("event", {}))
-    text += format_eggs_block(info.get("eggs", []))
+    text += format_block("seeds_stock",   CATEGORY_EMOJI["seeds_stock"],   seeds)
+    text += format_block("cosmetic_stock",CATEGORY_EMOJI["cosmetic_stock"],cosmetic)
+    text += format_block("gear_stock",    CATEGORY_EMOJI["gear_stock"],    gear)
+    text += format_block("egg_stock",     CATEGORY_EMOJI["egg_stock"],     egg)
+
     await update.callback_query.message.reply_markdown(text)
 
-# Запуск
-from flask import Flask
+# 8) Flask для healthcheck
 app = Flask(__name__)
+
 @app.route("/")
 def healthcheck():
     return "Bot is alive!"
 
+# 9) Запуск
 if __name__ == "__main__":
-    # Запускаем Flask в фоне
-    flask_thread = threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000))), daemon=True)
-    flask_thread.start()
+    # Запускаем Flask в фоновом потоке
+    threading.Thread(
+        target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000))),
+        daemon=True
+    ).start()
 
-    # Запускаем Telegram-бот в главном потоке
+    # Запускаем Telegram-бот
     app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CallbackQueryHandler(on_button, pattern="show_stock"))
