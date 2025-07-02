@@ -1,11 +1,10 @@
-# bot.py
 import os
 import threading
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 from flask import Flask
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, BotCommand
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # Загрузим переменные окружения
@@ -26,23 +25,22 @@ CATEGORY_EMOJI = {
     "cosmetic_stock": "💎",
     "gear_stock":     "🧰",
     "egg_stock":      "🥚",
+    "weather":        "☁️"
 }
 
 # Эмодзи по названиям предметов
 ITEM_EMOJI = {
-    "Feijoa":"🥝", "Kiwi":"🥝", "Avocado":"🥑", "Sugar Apple":"🍏", "Tomato":"🍅",
-    "Bell Pepper":"🌶️", "Pitcher Plant":"🌱", "Prickly Pear":"🌵", "Cauliflower":"🥦",
-    "Blueberry":"🫐", "Carrot":"🥕", "Loquat":"🍑", "Green Apple":"🍏", "Strawberry":"🍓",
-    "Watermelon":"🍉", "Banana":"🍌", "Rafflesia":"🌺", "Pineapple":"🍍",
-    "Green Tractor":"🚜", "Large Wood Flooring":"🪵", "Sign Crate":"📦", "Small Wood Table":"🪑",
-    "Large Path Tile":"🛤️", "Medium Path Tile":"⬛", "Wood Fence":"🪵", "Axe Stump":"🪨", "Shovel":"🪓",
-    "Advanced Sprinkler":"💦", "Master Sprinkler":"💧", "Basic Sprinkler":"🌦️", "Godly Sprinkler":"⚡",
-    "Trowel":"⛏️", "Harvest Tool":"🧲", "Cleaning Spray":"🧴", "Recall Wrench":"🔧",
-    "Favorite Tool":"❤️", "Watering Can":"🚿", "Magnifying Glass":"🔍", "Tanning Mirror":"🪞", "Friendship Pot":"🌻",
-    "Common Egg":"🥚"
+    # Seeds
+    "Carrot": "🥕", "Strawberry": "🍓", "Blueberry": "🫐", "Tomato": "🍅",
+    "Banana": "🍌",
+    # Gear
+    "Harvest Tool": "🧲", "Trowel": "⛏️", "Cleaning Spray": "🧴",
+    "Recall Wrench": "🔧", "Favorite Tool": "❤️", "Watering Can": "🚿",
+    # Eggs
+    "Common Egg": "🥚"
 }
 
-# Получить стоки из Supabase
+# Функция запроса стока по типу
 def fetch_stock(stock_type: str):
     params = {
         "select": "*",
@@ -50,69 +48,91 @@ def fetch_stock(stock_type: str):
         "active": "eq.true",
         "order": "created_at.desc"
     }
-    try:
-        resp = requests.get(BASE_URL, headers=HEADERS, params=params)
-        return resp.json() if resp.ok else []
-    except Exception as e:
-        print(f"Error fetching {stock_type}: {e}")
-        return []
+    resp = requests.get(BASE_URL, headers=HEADERS, params=params)
+    return resp.json() if resp.ok else []
 
-# Форматирование блока для Telegram
+# Функция запроса погоды
+def fetch_weather():
+    params = {
+        "select": "*",
+        "type": "eq.weather",
+        "active": "eq.true",
+        "order": "date.desc",
+        "limit": 1
+    }
+    resp = requests.get(BASE_URL, headers=HEADERS, params=params)
+    return resp.json() if resp.ok else []
+
+# Форматирование блока стока
 def format_block(title: str, emoji: str, items: list) -> str:
     if not items:
         return ""
-    title_pretty = title.replace("_stock", "").capitalize()
-    text = f"━ {emoji} {title_pretty} ━\n"
+    header = title.replace("_", " ").title().replace(" Stock", "")
+    text = f"**━ {emoji} {header} Stock ━**\n"
     for it in items:
-        name = it.get("display_name", "???")
+        name = it.get("display_name", "Unknown")
         qty  = it.get("multiplier", 0)
         em   = ITEM_EMOJI.get(name, "•")
         text += f"   {em} {name}: x{qty}\n"
     return text + "\n"
 
+# Форматирование погоды
+from zoneinfo import ZoneInfo
+
+def format_weather(item: dict) -> str:
+    if not item:
+        return "**☁️ Погода отсутствует**"
+    # Парсим дату UTC из API и конвертируем в MSK
+    iso_date = item.get("date")
+    try:
+        dt_utc = datetime.fromisoformat(iso_date.replace("Z", "+00:00"))
+        dt_msk = dt_utc.astimezone(ZoneInfo("Europe/Moscow"))
+        time_msk = dt_msk.strftime("%d.%m.%Y %H:%M:%S MSK")
+    except Exception:
+        time_msk = iso_date
+    desc = item.get("display_name", "?")
+    mult = item.get("multiplier", "?")
+    return f"**━ ☁️ Weather ━**
+   🕒 {time_msk}
+   🌡️ {desc}: x{mult}
+
 # Клавиатура
 def get_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 Показать стоки", callback_data="show_stock")]
+        [InlineKeyboardButton("📦 Показать стоки", callback_data="show_stock")],
+        [InlineKeyboardButton("☁️ Показать погоду", callback_data="show_weather")]
     ])
 
-# Функция формирования и отправки стоков
-async def send_stock_message(chat_id, context: ContextTypes.DEFAULT_TYPE):
-    # Запрос данных по категориям
+# Обработчики Telegram
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Привет! Выбери действие:",
+        reply_markup=get_keyboard()
+    )
+
+async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    # Собираем стоки
     stocks = {
         "seeds_stock":    fetch_stock("seeds_stock"),
         "cosmetic_stock": fetch_stock("cosmetic_stock"),
         "gear_stock":     fetch_stock("gear_stock"),
         "egg_stock":      fetch_stock("egg_stock"),
     }
+    now = datetime.utcnow().strftime("**🕒 %d.%m.%Y %H:%M:%S UTC**\n\n")
+    text = now + "**📊 Стоки Grow a Garden:**\n\n"
+    for key, items in stocks.items():
+        text += format_block(key, CATEGORY_EMOJI.get(key, "📦"), items)
+    await update.callback_query.message.reply_markdown(text)
 
-    # Время UTC+3
-    now = datetime.utcnow() + timedelta(hours=3)
-    timestamp = now.strftime("%d.%m.%Y %H:%M:%S UTC+3")
-
-    text = f"🕒 {timestamp}\n\n📊 *Стоки Grow a Garden:*\n\n"
-    for category, items in stocks.items():
-        text += format_block(category, CATEGORY_EMOJI.get(category, "📦"), items)
-
-    await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
-
-# Команда /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Привет! Нажми кнопку или введи /stock, чтобы получить текущие стоки:",
-        reply_markup=get_keyboard()
-    )
-
-# Команда /stock
-async def stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_stock_message(update.effective_chat.id, context)
-
-# Нажатие кнопки
-async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    await send_stock_message(update.callback_query.message.chat_id, context)
+    data = fetch_weather()
+    item = data[0] if data else None
+    text = format_weather(item)
+    await update.callback_query.message.reply_markdown(text)
 
-# Flask для ping
+# Flask для healthcheck
 app = Flask(__name__)
 @app.route("/")
 def healthcheck():
@@ -121,23 +141,15 @@ def healthcheck():
 # Запуск
 if __name__ == "__main__":
     threading.Thread(
-        target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000))),
+        target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000))),
         daemon=True
     ).start()
 
     app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    # Регистрация команд в меню Telegram
-    commands = [
-        BotCommand("start", "Начать"),
-        BotCommand("stock", "Показать стоки Grow a Garden")
-    ]
-    app_bot.bot.set_my_commands(commands)
-
-    # Хендлеры
     app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CommandHandler("stock", stock))
-    app_bot.add_handler(CallbackQueryHandler(on_button, pattern="show_stock"))
-
+    app_bot.add_handler(CallbackQueryHandler(handle_stock,   pattern="show_stock"))
+    app_bot.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
+    # Обработчик команды /weather
+    app_bot.add_handler(CommandHandler("weather", handle_weather))
     print("✅ Bot is running…")
     app_bot.run_polling()
