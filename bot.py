@@ -26,13 +26,16 @@ CATEGORY_EMOJI = {
     "weather":        "☁️"
 }
 ITEM_EMOJI = {
-    # Seeds
-    "Carrot":"🥕","Strawberry":"🍓","Blueberry":"🫐","Tomato":"🍅","Banana":"🍌",
-    # Gear
-    "Harvest Tool":"🧲","Trowel":"⛏️","Cleaning Spray":"🧴","Recall Wrench":"🔧",
-    "Favorite Tool":"❤️","Watering Can":"🚿",
-    # Eggs
-    "Common Egg":"🥚","Common Summer Egg":"☀️🥚","Paradise Egg":"🐣"
+    "Feijoa":"🥝", "Kiwi":"🥝", "Avocado":"🥑", "Sugar Apple":"🍏", "Tomato":"🍅",
+    "Bell Pepper":"🌶️", "Pitcher Plant":"🌱", "Prickly Pear":"🌵", "Cauliflower":"🥦",
+    "Blueberry":"🫐", "Carrot":"🥕", "Loquat":"🍑", "Green Apple":"🍏", "Strawberry":"🍓",
+    "Watermelon":"🍉", "Banana":"🍌", "Rafflesia":"🌺", "Pineapple":"🍍",
+    "Green Tractor":"🚜", "Large Wood Flooring":"🪵", "Sign Crate":"📦", "Small Wood Table":"🪑",
+    "Large Path Tile":"🛤️", "Medium Path Tile":"⬛", "Wood Fence":"🪵", "Axe Stump":"🪨", "Shovel":"🪓",
+    "Advanced Sprinkler":"💦", "Master Sprinkler":"💧", "Basic Sprinkler":"🌦️", "Godly Sprinkler":"⚡",
+    "Trowel":"⛏️", "Harvest Tool":"🧲", "Cleaning Spray":"🧴", "Recall Wrench":"🔧",
+    "Favorite Tool":"❤️", "Watering Can":"🚿", "Magnifying Glass":"🔍", "Tanning Mirror":"🪞", "Friendship Pot":"🌻",
+    "Common Egg":"🥚", "Common Summer Egg":"🥚", "Paradise Egg":"🐣"
 }
 
 # 4) Fetch stock
