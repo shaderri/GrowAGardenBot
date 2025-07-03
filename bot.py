@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
@@ -11,46 +12,36 @@ from zoneinfo import ZoneInfo
 # Load environment
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_KEY   = os.getenv("API_KEY")  # Supabase API key
+API_KEY   = os.getenv("API_KEY")  # Supabase key for stock fallback
 
 # Endpoints
-SUPABASE_URL     = "https://vextbzatpprnksyutbcp.supabase.co/rest/v1/growagarden_stock"
-SUPABASE_HEADERS = {"apikey": API_KEY, "Authorization": f"Bearer {API_KEY}"}
-JOSH_URL         = "https://api.joshlei.com/v2/growagarden/stock"
+JOSH_URL     = "https://api.joshlei.com/v2/growagarden/stock"
+WEATHER_URL  = "https://growagardenstock.com/api/stock/weather"
 
 # Emoji mappings
 CATEGORY_EMOJI = {
-    "seeds": "🌱",
-    "gear":  "🧰",
-    "egg":   "🥚",
-    "event": "🎉",
+    "seeds":   "🌱",
+    "gear":    "🧰",
+    "egg":     "🥚",
+    "event":   "🎉",
     "weather": "☁️"
 }
 ITEM_EMOJI = {
     # Seeds
     "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "tomato": "🍅",
-    "banana": "🍌", "feijoa": "🥝", "kiwi": "🥝", "avocado": "🥑",
     # Gear
     "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
     "favorite_tool": "❤️", "harvest_tool": "🧲", "advanced_sprinkler": "💦",
     # Eggs
     "common_egg": "🥚", "paradise_egg": "🐣",
-    # Event (Summer)
+    # Event
     "delphinium": "🌸", "summer_seed_pack": "🌞", "mutation_spray_burnt": "🔥"
 }
 
-# Fetch all stock (excluding cosmetic)
+# Fetch all stock
 def fetch_all_stock():
     r = requests.get(JOSH_URL)
-    if not r.ok:
-        return {}
-    data = r.json()
-    return {
-        "seeds": data.get("seed_stock", []),
-        "gear":  data.get("gear_stock", []),
-        "egg":   data.get("egg_stock", []),
-        "event": data.get("eventshop_stock", [])
-    }
+    return r.json() if r.ok else {}
 
 # Format a stock category block
 def format_block(category: str, items: list) -> str:
@@ -67,29 +58,22 @@ def format_block(category: str, items: list) -> str:
         text += f"   {em} {name}: x{qty}\n"
     return text + "\n"
 
-# Fetch weather fallback
+# Fetch weather from new API
 def fetch_weather():
-    params = {"select":"*","type":"eq.weather","active":"eq.true","order":"date.desc","limit":1}
-    r = requests.get(SUPABASE_URL, headers=SUPABASE_HEADERS, params=params)
-    return r.json() if r.ok else []
+    ts = int(time.time() * 1000)
+    params = {"ts": ts, "_": ts}
+    r = requests.get(WEATHER_URL, params=params)
+    return r.json() if r.ok else {}
 
 # Format weather block
-def format_weather(item: dict) -> str:
-    if not item:
+def format_weather(data: dict) -> str:
+    if not data or "description" not in data:
         return "**☁️ Weather отсутствует**"
-    iso = item.get("date")
-    try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Moscow"))
-        time_str = dt.strftime("%d.%m.%Y %H:%M:%S MSK")
-    except:
-        time_str = iso
-    desc = item.get("display_name", "?")
-    lines = [
-        "**━ ☁️ Weather ━**",
-        f"   🕒 {time_str}",
-        f"   🌡️ {desc}"
-    ]
-    return "\n".join(lines)
+    icon        = data.get("icon", "☁️")
+    description = data.get("description", "")
+    # description already contains markdown
+    header = f"**━ {icon} Weather ━**"
+    return f"{header}\n{description}"
 
 # Keyboard layout
 def get_keyboard():
@@ -99,6 +83,7 @@ def get_keyboard():
     ])
 
 # Handlers
+tz = ZoneInfo("Europe/Moscow")
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Выбери действие:", reply_markup=get_keyboard())
 
@@ -109,13 +94,11 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         target = update.message
     stock = fetch_all_stock()
-    dt = datetime.now(tz=ZoneInfo("Europe/Moscow"))
+    dt = datetime.now(tz=tz)
     now = f"**🕒 {dt.strftime('%d.%m.%Y %H:%M:%S MSK')}**\n\n"
     text = now + "**📊 Стоки Grow a Garden:**\n\n"
-    text += format_block("seeds", stock.get("seeds", []))
-    text += format_block("gear",  stock.get("gear", []))
-    text += format_block("egg",   stock.get("egg", []))
-    text += format_block("event", stock.get("event", []))
+    for cat in ["seeds","gear","egg","event"]:
+        text += format_block(cat, stock.get(f"{cat}_stock", []))
     await target.reply_markdown(text)
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -124,9 +107,8 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target = update.callback_query.message
     else:
         target = update.message
-    arr = fetch_weather()
-    item = arr[0] if arr else None
-    text = format_weather(item)
+    data = fetch_weather()
+    text = format_weather(data)
     await target.reply_markdown(text)
 
 # Flask healthcheck
@@ -138,8 +120,7 @@ def healthcheck():
 # Main
 if __name__ == "__main__":
     threading.Thread(
-        target=lambda: app.run(host="0.0.0.0", port=int(os.getenv("PORT",10000))),
-        daemon=True
+        target=lambda: app.run(host="0.0.0.0", port=int(os.getenv("PORT",10000))), daemon=True
     ).start()
     bot = ApplicationBuilder().token(BOT_TOKEN).build()
     bot.add_handler(CommandHandler("start", start))
