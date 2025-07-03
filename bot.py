@@ -11,11 +11,12 @@ from zoneinfo import ZoneInfo
 # 1) Load environment
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_KEY   = os.getenv("API_KEY")
+API_KEY   = os.getenv("API_KEY")  # Supabase API key, not used for new source
 
-# 2) Supabase endpoint
-BASE_URL = "https://vextbzatpprnksyutbcp.supabase.co/rest/v1/growagarden_stock"
-HEADERS = {"apikey": API_KEY, "Authorization": f"Bearer {API_KEY}"}
+# 2) API endpoints
+SUPABASE_URL = "https://vextbzatpprnksyutbcp.supabase.co/rest/v1/growagarden_stock"
+SUPABASE_HEADERS = {"apikey": API_KEY, "Authorization": f"Bearer {API_KEY}"}
+JOSH_URL = "https://api.joshlei.com/v2/growagarden/stock"
 
 # 3) Emoji mappings
 CATEGORY_EMOJI = {
@@ -38,112 +39,101 @@ ITEM_EMOJI = {
     "Common Egg":"🥚", "Common Summer Egg":"🥚", "Paradise Egg":"🐣"
 }
 
-# 4) Fetch stock
-def fetch_stock(stock_type: str):
-    params = {
-        "select": "*",
-        "type": f"eq.{stock_type}",
-        "active": "eq.true",
-        "order": "created_at.desc"
+# 4) Fetch stock from new source (excluding cosmetic)
+def fetch_all_stock():
+    resp = requests.get(JOSH_URL)
+    if not resp.ok:
+        return {}
+    data = resp.json()
+    # keys: seed_stock, gear_stock, egg_stock, eventshop_stock
+    return {
+        "seeds": data.get("seed_stock", []),
+        "gear":  data.get("gear_stock", []),
+        "egg":   data.get("egg_stock", []),
+        "event": data.get("eventshop_stock", [])
     }
-    resp = requests.get(BASE_URL, headers=HEADERS, params=params)
-    return resp.json() if resp.ok else []
 
-# 5) Fetch weather
-def fetch_weather():
-    params = {
-        "select": "*",
-        "type": "eq.weather",
-        "active": "eq.true",
-        "order": "date.desc",
-        "limit": 1
-    }
-    resp = requests.get(BASE_URL, headers=HEADERS, params=params)
-    return resp.json() if resp.ok else []
-
-# 6) Format stock block
-def format_block(key: str, emoji: str, items: list) -> str:
+# 5) Format block
+def format_block(category: str, items: list) -> str:
     if not items:
         return ""
-    title = key.replace("_stock", "").replace("_", " ").title()
-    text = f"**━ {emoji} {title} Stock ━**\n"
+    emoji = CATEGORY_EMOJI.get(category, "📦")
+    title = category.capitalize() + " Stock"
+    text = f"**━ {emoji} {title} ━**\n"
     for it in items:
         name = it.get("display_name", "Unknown")
-        qty  = it.get("multiplier", 0)
-        em   = ITEM_EMOJI.get(name, "•")
+        qty  = it.get("quantity", 0)
+        icon_key = it.get("item_id", name).lower()
+        em = ITEM_EMOJI.get(icon_key, "•")
         text += f"   {em} {name}: x{qty}\n"
     return text + "\n"
 
-# 7) Format weather block
-def format_weather(item: dict) -> str:
-    if not item:
-        return "**☁️ Weather отсутствует**"
-    iso = item.get("date")
-    try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Moscow"))
-        time_str = dt.strftime("%d.%m.%Y %H:%M:%S MSK")
-    except:
-        time_str = iso
-    desc = item.get("display_name", "?")
-    lines = [
-        "**━ ☁️ Weather ━**",
-        f"   🕒 {time_str}",
-        f"   🌡️ {desc}"
-    ]
-    return "\n".join(lines)
-
-# 8) Keyboard
+# 6) Keyboard
 def get_keyboard():
-     return InlineKeyboardMarkup([
-         [InlineKeyboardButton("📦 Показать стоки", callback_data="show_stock")],
-         [InlineKeyboardButton("☁️ Показать погоду", callback_data="show_weather")]
-     ])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📦 Показать стоки", callback_data="show_stock")],
+        [InlineKeyboardButton("☁️ Показать погоду", callback_data="show_weather")]
+    ])
 
-# 9) Handlers
+# 7) Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-     await update.message.reply_text("Привет! Выбери действие:", reply_markup=get_keyboard())
+    await update.message.reply_text("Привет! Выбери действие:", reply_markup=get_keyboard())
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-     # handle callback or command
-     if update.callback_query:
-         await update.callback_query.answer()
-         target = update.callback_query.message
-     else:
-         target = update.message
-     data = {k: fetch_stock(k) for k in ["seeds_stock","cosmetic_stock","gear_stock","egg_stock"]}
-     now = datetime.utcnow().strftime("**🕒 %d.%m.%Y %H:%M:%S UTC**\n\n")
-     text = now + "**📊 Стоки Grow a Garden:**\n\n"
-     for k, items in data.items():
-         text += format_block(k, CATEGORY_EMOJI.get(k, "📦"), items)
-     await target.reply_markdown(text)
+    if update.callback_query:
+        await update.callback_query.answer()
+        target = update.callback_query.message
+    else:
+        target = update.message
+    stock = fetch_all_stock()
+    now = datetime.utcnow().strftime("**🕒 %d.%m.%Y %H:%M:%S UTC**\n\n")
+    text = now + "**📊 Стоки Grow a Garden:**\n\n"
+    # in order seeds, gear, egg, event
+    text += format_block("seeds", stock.get("seeds", []))
+    text += format_block("gear",  stock.get("gear", []))
+    text += format_block("egg",   stock.get("egg", []))
+    text += format_block("event", stock.get("event", []))
+    await target.reply_markdown(text)
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
-     if update.callback_query:
-         await update.callback_query.answer()
-         target = update.callback_query.message
-     else:
-         target = update.message
-     arr = fetch_weather()
-     item = arr[0] if arr else None
-     text = format_weather(item)
-     await target.reply_markdown(text)
+    # fallback to Supabase weather
+    params = {"select":"*","type":"eq.weather","active":"eq.true","order":"date.desc","limit":1}
+    resp = requests.get(SUPABASE_URL, headers=SUPABASE_HEADERS, params=params)
+    item = resp.json()[0] if resp.ok and resp.json() else None
+    # format weather
+    if not item:
+        text = "**☁️ Weather отсутствует**"
+    else:
+        iso = item.get("date")
+        try:
+            dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Moscow"))
+            time_str = dt.strftime("%d.%m.%Y %H:%M:%S MSK")
+        except:
+            time_str = iso
+        desc = item.get("display_name", "?")
+        text = "**━ ☁️ Weather ━**\n"
+        text += f"   🕒 {time_str}\n"
+        text += f"   🌡️ {desc}\n"
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_markdown(text)
+    else:
+        await update.message.reply_markdown(text)
 
-# 10) Flask healthcheck
+# 8) Flask healthcheck
 app = Flask(__name__)
 @app.route("/")
 def healthcheck():
-     return "Bot is alive!"
+    return "Bot is alive!"
 
-# 11) Main
+# 9) Main
 if __name__ == "__main__":
-     threading.Thread(
-         target=lambda: app.run(host="0.0.0.0", port=int(os.getenv("PORT",10000))), daemon=True
-     ).start()
-     bot = ApplicationBuilder().token(BOT_TOKEN).build()
-     bot.add_handler(CommandHandler("start", start))
-     bot.add_handler(CommandHandler("stock", handle_stock))
-     bot.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
-     bot.add_handler(CommandHandler("weather", handle_weather))
-     bot.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
-     print("✅ Bot is running…")
-     bot.run_polling()
+    threading.Thread(target=lambda: app.run(host="0.0.0.0",port=int(os.getenv("PORT",10000))),daemon=True).start()
+    bot = ApplicationBuilder().token(BOT_TOKEN).build()
+    bot.add_handler(CommandHandler("start", start))
+    bot.add_handler(CommandHandler("stock", handle_stock))
+    bot.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
+    bot.add_handler(CommandHandler("weather", handle_weather))
+    bot.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
+    print("✅ Bot is running…")
+    bot.run_polling()
