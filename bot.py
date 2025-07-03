@@ -1,3 +1,4 @@
+# bot.py
 import os
 import threading
 import requests
@@ -30,15 +31,15 @@ ITEM_EMOJI = {
     "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "tomato": "🍅", "banana": "🍌",
     "cauliflower": "🥦", "watermelon": "🍉", "rafflesia": "🌺", "green_apple": "🍏",
     "avocado": "🥑", "pineapple": "🍍", "kiwi": "🥝", "bell_pepper": "🌶️",
-    "prickly_pear": "🌵", "loquat": "🍑", "feijoa": "🥝", "pitcher_plant": "🌱",
+    "prickly_pear": "🌵", "loquat": "🍑", "feijoa": "🥝", "pitcher_plant": "🌱", "sugar_apple": "🍎",
     # Gear
     "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
     "basic_sprinkler": "🌦️", "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
     "magnifying_glass": "🔍", "tanning_mirror": "🪞", "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝",
     # Eggs
-    "common_egg": "🥚", "mythical_egg": "🐣", "bug_egg": "🐞", "common_summer_egg": "☀️", "rare_summer_egg": "🌞", "paradise_egg": "🐤", "bee_egg": "🐝",
+    "common_egg": "🥚", "mythical_egg": "🐣", "bug_egg": "🐣", "common_summer_egg": "🥚", "rare_summer_egg": "🥚", "paradise_egg": "🐣", "bee_egg": "🐣",
     # Event
-    "summer_seed_pack": "🌞", "delphinium": "🌸", "lily_of_the_valley_seed": "💐", "traveller_fruit_seed": "✈️", "burnt_mutation_spray": "🔥", "oasis_crate": "🏝️", "oasis_egg": "🥚", "hamster": "🐹"
+    "summer_seed_pack": "🌞", "delphinium": "🌸", "lily_of_the_valley": "💐", "traveler's_fruit": "✈️", "mutation_spray_burnt": "🔥", "oasis_crate": "🏝️", "oasis_egg": "🥚", "hamster": "🐹"
 }
 
 # Fetch all stock
@@ -79,27 +80,12 @@ def fetch_weather():
 def format_weather(data: dict) -> str:
     icon = data.get("icon", "☁️")
     current = data.get("currentWeather", "")
-    updated = data.get("updatedAt", 0)
-    # convert updatedAt ms to MSK
-    try:
-        dt = datetime.fromtimestamp(updated/1000, tz=ZoneInfo("Europe/Moscow"))
-        time_str = dt.strftime("%d.%m.%Y %H:%M:%S MSK")
-    except:
-        time_str = ""
-    effect = data.get("effectDescription", "").strip()
-    # Remove Ends lines
-    lines_effect = [line for line in effect.splitlines() if not line.startswith("- Ends:")]
-
+    # Сборка только текущей погоды
     lines = [f"**━ {icon} Погода ━**"]
-    if current.lower() == "sunny":
-        lines.append("**❗ Нет активной погоды в данный момент**")
+    if current:
+        lines.append(f"**Текущая:** {current}")
     else:
-        lines.append(f"**Текущая погода:** {current}")
-        lines.append(f"**Обновлено:** {time_str}")
-        lines.append(f"**Длительность:** {lines_effect[1].replace('- Duration:', '').strip()}")
-    if lines_effect:
-        lines.append("\n**Последняя погода:**")
-        lines.extend(lines_effect)
+        lines.append("**Текущая погода недоступна**")
     return "\n".join(lines)
 
 # Keyboard layout
@@ -140,5 +126,5 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Flask healthcheck
 app = Flask(__name__)
 @app.route("/")
-def home():
-    return "Grow a Garden Bot is running!"
+def healthcheck():
+    return "Bot is running!"
