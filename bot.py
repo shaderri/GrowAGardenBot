@@ -32,24 +32,20 @@ ITEM_EMOJI = {
     "avocado": "🥑", "pineapple": "🍍", "kiwi": "🥝", "bell_pepper": "🌶️",
     "prickly_pear": "🌵", "loquat": "🍑", "feijoa": "🥝", "pitcher_plant": "🌱",
     # Gear
-    "watering_can": "🚿", "trowel": "⛏️", "recall_wrench": "🔧", "basic_sprinkler": "🌦️",
-    "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
-    "magnifying_glass": "🔍", "tanning_mirror": "🪞", "cleaning_spray": "🧴",
-    "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝",
+    "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
+    "basic_sprinkler": "🌦️", "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
+    "magnifying_glass": "🔍", "tanning_mirror": "🪞", "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝",
     # Eggs
-    "common_egg": "🥚", "mythical_egg": "🦄🥚", "bug_egg": "🐞🥚", "common_summer_egg": "☀️🥚",
-    "rare_summer_egg": "🌞🥚", "paradise_egg": "🐣", "bee_egg": "🐝🥚",
+    "common_egg": "🥚", "mythical_egg": "🐣", "bug_egg": "🐞", "common_summer_egg": "☀️", "rare_summer_egg": "🌞", "paradise_egg": "🐤", "bee_egg": "🐝",
     # Event
-    "summer_seed_pack": "🌞", "delphinium": "🌸", "lily_of_the_valley_seed": "💐",
-    "traveller_fruit_seed": "✈️🍓", "burnt_mutation_spray": "🔥", "oasis_crate": "🏝️",
-    "oasis_egg": "🥚🏝️", "hamster": "🐹"
+    "summer_seed_pack": "🌞", "delphinium": "🌸", "lily_of_the_valley_seed": "💐", "traveller_fruit_seed": "✈️", "burnt_mutation_spray": "🔥", "oasis_crate": "🏝️", "oasis_egg": "🥚", "hamster": "🐹"
 }
 
+# Fetch all stock
 def fetch_all_stock():
-    # Fetch JSON once
     r = requests.get(JOSH_URL)
     if not r.ok:
-        return {"seeds":[],"gear":[],"egg":[],"event":[]}
+        return {"seeds":[], "gear":[], "egg":[], "event":[]}
     data = r.json()
     return {
         "seeds": data.get("seed_stock", []),
@@ -58,6 +54,7 @@ def fetch_all_stock():
         "event": data.get("eventshop_stock", [])
     }
 
+# Format a stock category block
 def format_block(category: str, items: list) -> str:
     if not items:
         return ""
@@ -72,42 +69,47 @@ def format_block(category: str, items: list) -> str:
         lines.append(f"   {em} {name}: x{qty}")
     return "\n".join(lines) + "\n\n"
 
-# Weather fetch and format
-
+# Fetch weather
 def fetch_weather():
     ts = int(time.time() * 1000)
     r = requests.get(WEATHER_URL, params={"ts": ts, "_": ts})
     return r.json() if r.ok else {}
 
+# Format weather block
 def format_weather(data: dict) -> str:
     icon = data.get("icon", "☁️")
-    current = data.get("currentWeather", "Unknown")
-    desc = data.get("description", "").strip()
-    # Translate description labels
-    desc = desc.replace("- Duration:", "- Длительность:")
-    # Если текущая погода "Sunny", считаем нет события
+    current = data.get("currentWeather", "")
+    updated = data.get("updatedAt", 0)
+    # convert updatedAt ms to MSK
+    try:
+        dt = datetime.fromtimestamp(updated/1000, tz=ZoneInfo("Europe/Moscow"))
+        time_str = dt.strftime("%d.%m.%Y %H:%M:%S MSK")
+    except:
+        time_str = ""
+    effect = data.get("effectDescription", "").strip()
+    # Remove Ends lines
+    lines_effect = [line for line in effect.splitlines() if not line.startswith("- Ends:")]
+
     lines = [f"**━ {icon} Погода ━**"]
     if current.lower() == "sunny":
-        lines.append("**❗ Нет активной погоды в данный момент **")
+        lines.append("**❗ Нет активной погоды в данный момент**")
     else:
-        # Текущая погода
-        lines.append(f"**Текущая:** {current}")
-    # Всегда показываем последнюю погоду ниже
-    lines.append("**Последняя погода:**")
-    # Отображаем только effectDescription без Ends
-    effect = data.get("effectDescription", "").strip()
-    # Убираем строки с Ends
-    effect = "".join([line for line in effect.splitlines() if not line.strip().startswith("- Ends:")])
-    lines.extend(effect.splitlines())
-    return "".join(lines)
+        lines.append(f"**Текущая погода:** {current}")
+        lines.append(f"**Обновлено:** {time_str}")
+        lines.append(f"**Длительность:** {lines_effect[1].replace('- Duration:', '').strip()}")
+    if lines_effect:
+        lines.append("\n**Последняя погода:**")
+        lines.extend(lines_effect)
+    return "\n".join(lines)
 
-# Keyboard
+# Keyboard layout
 def get_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📦 Показать стоки", callback_data="show_stock")],
         [InlineKeyboardButton("☁️ Показать погоду", callback_data="show_weather")]
     ])
 
+# Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Выбери действие:", reply_markup=get_keyboard())
 
@@ -121,8 +123,8 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dt = datetime.now(tz=ZoneInfo("Europe/Moscow"))
     header = f"**🕒 {dt.strftime('%d.%m.%Y %H:%M:%S MSK')}**\n\n**📊 Стоки Grow a Garden:**\n\n"
     text = header
-    for cat in ["seeds","gear","egg","event"]:
-        text += format_block(cat, stock[cat])
+    for cat in ["seeds", "gear", "egg", "event"]:
+        text += format_block(cat, stock.get(cat, []))
     await target.reply_markdown(text)
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -138,15 +140,5 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Flask healthcheck
 app = Flask(__name__)
 @app.route("/")
-def healthcheck(): return "Bot is alive!"
-
-if __name__ == "__main__":
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.getenv("PORT",10000))), daemon=True).start()
-    bot = ApplicationBuilder().token(BOT_TOKEN).build()
-    bot.add_handler(CommandHandler("start", start))
-    bot.add_handler(CommandHandler("stock", handle_stock))
-    bot.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
-    bot.add_handler(CommandHandler("weather", handle_weather))
-    bot.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
-    print("✅ Bot is running…")
-    bot.run_polling()
+def home():
+    return "Grow a Garden Bot is running!"
