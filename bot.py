@@ -28,7 +28,7 @@ CATEGORY_EMOJI = {
 ITEM_EMOJI = {
     # Seeds
     "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "tomato": "🍅", "banana": "🍌",
-    "cauliflower": "🥦", "watermelon": "🍉", "raffleisa": "🌺", "green_apple": "🍏",
+    "cauliflower": "🥦", "watermelon": "🍉", "rafflesia": "🌺", "green_apple": "🍏",
     "avocado": "🥑", "pineapple": "🍍", "kiwi": "🥝", "bell_pepper": "🌶️",
     "prickly_pear": "🌵", "loquat": "🍑", "feijoa": "🥝", "pitcher_plant": "🌱",
     # Gear
