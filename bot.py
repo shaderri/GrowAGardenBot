@@ -1,9 +1,8 @@
-# bot.py
 import os
 import threading
 import requests
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from flask import Flask
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -60,8 +59,8 @@ def format_block(category: str, items: list) -> str:
     if not items:
         return ""
     emoji = CATEGORY_EMOJI[category]
-    title = category.capitalize() + " Stock"
-    lines = [f"**━ {emoji} {title} ━**"]
+    title = category.capitalize()
+    lines = [f"━ {emoji} **{title}** ━"]
     for it in items:
         key = it.get("item_id", "").lower()
         name = it.get("display_name", key.title())
@@ -78,14 +77,33 @@ def fetch_weather():
 
 # Format weather block
 def format_weather(data: dict) -> str:
-    icon = data.get("icon", "☁️")
-    current = data.get("currentWeather", "")
-    # Сборка только текущей погоды
+    icon      = data.get("icon", "☁️")
+    current   = data.get("currentWeather", "")
+    ends      = data.get("ends", None)
+    duration  = data.get("duration", None)
+    
+    # Сдвиг времени на +3 часа для MSK
+    if ends:
+        try:
+            t = datetime.strptime(ends, "%H:%M")
+            t = (t + timedelta(hours=3)).time()
+            ends_str = t.strftime("%H:%M")
+        except ValueError:
+            ends_str = ends
+    else:
+        ends_str = None
+
     lines = [f"**━ {icon} Погода ━**"]
     if current:
         lines.append(f"**Текущая:** {current}")
     else:
         lines.append("**Текущая погода недоступна**")
+
+    if ends_str:
+        lines.append(f"**Заканчивается в:** {ends_str}")
+    if duration:
+        lines.append(f"**Длительность:** {duration}")
+
     return "\n".join(lines)
 
 # Keyboard layout
@@ -107,7 +125,11 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target = update.message
     stock = fetch_all_stock()
     dt = datetime.now(tz=ZoneInfo("Europe/Moscow"))
-    header = f"**🕒 {dt.strftime('%d.%m.%Y %H:%M:%S MSK')}**\n\n**📊 Стоки Grow a Garden:**\n\n"
+    time_str = dt.strftime('%d.%m.%Y %H:%M:%S MSK')
+    header = (
+        f"**🕒 {time_str}**\n\n"
+        f"**📊 Стоки Grow a Garden:**\n\n"
+    )
     text = header
     for cat in ["seeds", "gear", "egg", "event"]:
         text += format_block(cat, stock.get(cat, []))
