@@ -28,13 +28,21 @@ CATEGORY_EMOJI = {
 ITEM_EMOJI = {
     # Seeds
     "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "tomato": "🍅", "banana": "🍌",
+    "cauliflower": "🥦", "watermelon": "🍉", "raffleisa": "🌺", "green_apple": "🍏",
+    "avocado": "🥑", "pineapple": "🍍", "kiwi": "🥝", "bell_pepper": "🌶️",
+    "prickly_pear": "🌵", "loquat": "🍑", "feijoa": "🥝", "pitcher_plant": "🌱",
     # Gear
-    "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
-    "favorite_tool": "❤️", "harvest_tool": "🧲", "advanced_sprinkler": "💦",
+    "watering_can": "🚿", "trowel": "⛏️", "recall_wrench": "🔧", "basic_sprinkler": "🌦️",
+    "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
+    "magnifying_glass": "🔍", "tanning_mirror": "🪞", "cleaning_spray": "🧴",
+    "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝",
     # Eggs
-    "common_egg": "🥚", "paradise_egg": "🐣",
+    "common_egg": "🥚", "mythical_egg": "🦄🥚", "bug_egg": "🐞🥚", "common_summer_egg": "☀️🥚",
+    "rare_summer_egg": "🌞🥚", "paradise_egg": "🐣", "bee_egg": "🐝🥚",
     # Event
-    "delphinium": "🌸", "summer_seed_pack": "🌞", "mutation_spray_burnt": "🔥"
+    "summer_seed_pack": "🌞", "delphinium": "🌸", "lily_of_the_valley_seed": "💐",
+    "traveller_fruit_seed": "✈️🍓", "burnt_mutation_spray": "🔥", "oasis_crate": "🏝️",
+    "oasis_egg": "🥚🏝️", "hamster": "🐹"
 }
 
 def fetch_all_stock():
@@ -75,20 +83,23 @@ def format_weather(data: dict) -> str:
     icon = data.get("icon", "☁️")
     current = data.get("currentWeather", "Unknown")
     desc = data.get("description", "").strip()
-    # Convert timestamp to MSK
-    updated = data.get("updatedAt")
-    try:
-        dt = datetime.fromtimestamp(updated/1000, tz=ZoneInfo("Europe/Moscow"))
-        time_str = dt.strftime("%d.%m.%Y %H:%M:%S MSK")
-    except:
-        time_str = ""
-    lines = [
-        f"**━ {icon} Weather ━**",
-        f"**Current:** {current}",
-        f"**Updated:** {time_str}",
-        desc
-    ]
-    return "\n".join(lines)
+    # Translate description labels
+    desc = desc.replace("- Duration:", "- Длительность:")
+    # Если текущая погода "Sunny", считаем нет события
+    lines = [f"**━ {icon} Погода ━**"]
+    if current.lower() == "sunny":
+        lines.append("**❗ Нет активной погоды в данный момент **")
+    else:
+        # Текущая погода
+        lines.append(f"**Текущая:** {current}")
+    # Всегда показываем последнюю погоду ниже
+    lines.append("**Последняя погода:**")
+    # Отображаем только effectDescription без Ends
+    effect = data.get("effectDescription", "").strip()
+    # Убираем строки с Ends
+    effect = "".join([line for line in effect.splitlines() if not line.strip().startswith("- Ends:")])
+    lines.extend(effect.splitlines())
+    return "".join(lines)
 
 # Keyboard
 def get_keyboard():
