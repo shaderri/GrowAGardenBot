@@ -2,6 +2,7 @@ import os
 import threading
 import requests
 import time
+import re
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from flask import Flask
@@ -13,11 +14,13 @@ from zoneinfo import ZoneInfo
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Endpoints
-JOSH_URL    = "https://api.joshlei.com/v2/growagarden/stock"
-WEATHER_URL = "https://growagardenstock.com/api/stock/weather"
+# New Endpoints
+GEAR_SEEDS_URL   = "https://growagardenstock.com/api/stock?type=gear-seeds"
+EGG_URL          = "https://growagardenstock.com/api/stock?type=egg"
+EVENT_URL        = "https://growagardenstock.com/api/special-stock?type=honey"
+WEATHER_URL      = "https://growagardenstock.com/api/stock/weather"
 
-# Emoji mappings
+# Emoji mappings (unchanged)
 CATEGORY_EMOJI = {
     "seeds":   "🌱",
     "gear":    "🧰",
@@ -38,23 +41,50 @@ ITEM_EMOJI = {
     # Eggs
     "common_egg": "🥚", "mythical_egg": "🐣", "bug_egg": "🐣", "common_summer_egg": "🥚", "rare_summer_egg": "🥚", "paradise_egg": "🐣", "bee_egg": "🐣",
     # Event
-    "summer_seed_pack": "🌞", "delphinium": "🌸", "lily_of_the_valley": "💐", "traveler's_fruit": "✈️", "mutation_spray_burnt": "🔥", "oasis_crate": "🏝️", "oasis_egg": "🥚", "hamster": "🐹"
+    "summer_seed_pack": "🌞", "delphinium": "🌸", "lily_of_the_valley": "💐", "traveler's_fruit": "✈️", "mutation_spray_burnt": "🔥",
+    "oasis_crate": "🏝️", "oasis_egg": "🥚", "hamster": "🐹"
 }
 
+# Helper to parse entries like "Item Name **xN**"
+def parse_stock_entries(entries: list) -> list:
+    parsed = []
+    for entry in entries:
+        match = re.match(r"(.+?) \*\*x(\d+)\*\*", entry)
+        if not match:
+            continue
+        name = match.group(1)
+        qty = int(match.group(2))
+        key = name.lower().replace(" ", "_").replace("'", "")
+        parsed.append({"item_id": key, "display_name": name, "quantity": qty})
+    return parsed
+
 # Fetch all stock
-def fetch_all_stock():
-    r = requests.get(JOSH_URL)
-    if not r.ok:
-        return {"seeds":[], "gear":[], "egg":[], "event":[]}
-    data = r.json()
+def fetch_all_stock() -> dict:
+    ts = int(time.time() * 1000)
+    # Gear and seeds
+    r1 = requests.get(GEAR_SEEDS_URL, params={"ts": ts})
+    gs = r1.json() if r1.ok else {}
+    gear_list  = parse_stock_entries(gs.get("gear", []))
+    seeds_list = parse_stock_entries(gs.get("seeds", []))
+
+    # Eggs
+    r2 = requests.get(EGG_URL, params={"ts": ts + 2})
+    eg = r2.json() if r2.ok else {}
+    egg_list = parse_stock_entries(eg.get("egg", []))
+
+    # Event (honey)
+    r3 = requests.get(EVENT_URL, params={"ts": ts + 4})
+    ev = r3.json() if r3.ok else {}
+    event_list = parse_stock_entries(ev.get("honey", []))
+
     return {
-        "seeds": data.get("seed_stock", []),
-        "gear":  data.get("gear_stock", []),
-        "egg":   data.get("egg_stock", []),
-        "event": data.get("eventshop_stock", [])
+        "seeds": seeds_list,
+        "gear":  gear_list,
+        "egg":   egg_list,
+        "event": event_list
     }
 
-# Format a stock category block
+# Format a stock category block (unchanged)
 def format_block(category: str, items: list) -> str:
     if not items:
         return ""
@@ -62,27 +92,25 @@ def format_block(category: str, items: list) -> str:
     title = category.capitalize()
     lines = [f"━ {emoji} **{title}** ━"]
     for it in items:
-        key = it.get("item_id", "").lower()
+        key = it.get("item_id", "")
         name = it.get("display_name", key.title())
         qty  = it.get("quantity", 0)
         em   = ITEM_EMOJI.get(key, "•")
         lines.append(f"   {em} {name}: x{qty}")
     return "\n".join(lines) + "\n\n"
 
-# Fetch weather
+# Fetch weather (unchanged)
 def fetch_weather():
     ts = int(time.time() * 1000)
     r = requests.get(WEATHER_URL, params={"ts": ts, "_": ts})
     return r.json() if r.ok else {}
 
-# Format weather block
+# Format weather block (unchanged)
 def format_weather(data: dict) -> str:
     icon      = data.get("icon", "☁️")
     current   = data.get("currentWeather", "")
     ends      = data.get("ends", None)
     duration  = data.get("duration", None)
-    
-    # Сдвиг времени на +3 часа для MSK
     if ends:
         try:
             t = datetime.strptime(ends, "%H:%M")
@@ -92,28 +120,25 @@ def format_weather(data: dict) -> str:
             ends_str = ends
     else:
         ends_str = None
-
     lines = [f"**━ {icon} Погода ━**"]
     if current:
         lines.append(f"**Текущая:** {current}")
     else:
         lines.append("**Текущая погода недоступна**")
-
     if ends_str:
         lines.append(f"**Заканчивается в:** {ends_str}")
     if duration:
         lines.append(f"**Длительность:** {duration}")
-
     return "\n".join(lines)
 
-# Keyboard layout
+# Keyboard layout (unchanged)
 def get_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📦 Показать стоки", callback_data="show_stock")],
         [InlineKeyboardButton("☁️ Показать погоду", callback_data="show_weather")]
     ])
 
-# Handlers
+# Handlers (unchanged structure)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Выбери действие:", reply_markup=get_keyboard())
 
@@ -145,7 +170,7 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = format_weather(data)
     await target.reply_markdown(text)
 
-# Flask healthcheck
+# Flask healthcheck (unchanged)
 app = Flask(__name__)
 @app.route("/")
 def healthcheck():
