@@ -96,7 +96,7 @@ def format_block(category: str, items: list) -> str:
         return ""
     emoji = CATEGORY_EMOJI.get(category, "•")
     title = category.capitalize()
-    lines = [f"━ {emoji} **{title}** ━"]
+    lines = [f"━ {emoji} *{title}* ━"]
     for it in items:
         em = ITEM_EMOJI.get(it['item_id'], "•")
         lines.append(f"   {em} {it['display_name']}: x{it['quantity']}")
@@ -115,11 +115,11 @@ def format_weather(data: dict) -> str:
             ends_str = dt.strftime("%H:%M MSK")
         except:
             ends_str = "--"
-    lines = [f"━ {icon} **Погода** ━", f"**Текущая:** {curr}"]
+    lines = [f"━ {icon} *Погода* ━", f"*Текущая:* {curr}"]
     if ends_str:
-        lines.append(f"**Заканчивается в:** {ends_str}")
+        lines.append(f"*Заканчивается в:* {ends_str}")
     if dur:
-        lines.append(f"**Длительность:** {dur}")
+        lines.append(f"*Длительность:* {dur}")
     return "\n".join(lines)
 
 # Keyboard layout
@@ -142,7 +142,7 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tgt = update.message
     stock = fetch_all_stock()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
-    text = f"**🕒 {now}**\n\n**📊 Стоки Grow a Garden:**\n\n"
+    text = f"*🕒 {now}*\n\n*📊 Стоки Grow a Garden:*\n\n"
     for cat in ["seeds", "gear", "egg", "event"]:
         text += format_block(cat, stock[cat])
     await tgt.reply_markdown(text)
@@ -155,7 +155,7 @@ async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tgt = update.message
     items = fetch_cosmetic()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
-    text = f"**🕒 {now}**\n\n**💄 Косметический сток:**\n\n"
+    text = f"*🕒 {now}*\n\n*💄 Косметический сток:*\n\n"
     text += format_block("cosmetic", items)
     await tgt.reply_markdown(text)
 
