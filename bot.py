@@ -1,5 +1,4 @@
 import os
-import threading
 import requests
 import time
 import re
@@ -9,8 +8,10 @@ from flask import Flask
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from zoneinfo import ZoneInfo
+import threading
 
-# Load environment\load_dotenv()
+# Load environment
+load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # New Endpoints
@@ -28,10 +29,7 @@ CATEGORY_EMOJI = {
     "weather": "☁️"
 }
 ITEM_EMOJI = {
-    "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "tomato": "🍅",
-    "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
-    "common_egg": "🥚", "common_summer_egg": "🥚",
-    "summer_seed_pack": "🌞", "delphinium": "🌸"
+    # add as needed
 }
 
 # Helper to parse entries like "Item Name **xN**"
@@ -69,20 +67,24 @@ def fetch_all_stock() -> dict:
 def format_block(category: str, items: list) -> str:
     if not items:
         return ""
-    emoji = CATEGORY_EMOJI[category]
+    emoji = CATEGORY_EMOJI.get(category, "•")
     lines = [f"━ {emoji} **{category.capitalize()}** ━"]
     for it in items:
         key = it["item_id"]
-        lines.append(f"   {ITEM_EMOJI.get(key, '•')} {it['display_name']}: x{it['quantity']}")
+        name = it["display_name"]
+        qty  = it["quantity"]
+        em = ITEM_EMOJI.get(key, "•")
+        lines.append(f"   {em} {name}: x{qty}")
     return "\n".join(lines) + "\n\n"
 
-# Fetch weather
-def fetch_weather():
+# Fetch and format weather
+
+def fetch_weather() -> dict:
     ts = int(time.time() * 1000)
     r = requests.get(WEATHER_URL, params={"ts": ts, "_": ts})
     return r.json() if r.ok else {}
 
-# Format weather
+
 def format_weather(data: dict) -> str:
     icon    = data.get("icon", "☁️")
     current = data.get("currentWeather", "--")
@@ -95,12 +97,14 @@ def format_weather(data: dict) -> str:
             ends_str = t.time().strftime("%H:%M")
         except:
             ends_str = ends
-    parts = [f"**━ {icon} Погода ━**", f"**Текущая:** {current}"]
-    if ends_str: parts.append(f"**Заканчивается в:** {ends_str}")
-    if dur:      parts.append(f"**Длительность:** {dur}")
-    return "\n".join(parts)
+    lines = [f"**━ {icon} Погода ━**", f"**Текущая:** {current}"]
+    if ends_str:
+        lines.append(f"**Заканчивается в:** {ends_str}")
+    if dur:
+        lines.append(f"**Длительность:** {dur}")
+    return "\n".join(lines)
 
-# Keyboard
+# Keyboard layout
 def get_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📦 Показать стоки", callback_data="show_stock")],
@@ -117,10 +121,10 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target = update.callback_query.message
     else:
         target = update.message
-    stock   = fetch_all_stock()
-    dt      = datetime.now(tz=ZoneInfo("Europe/Moscow"))
-    header  = f"**🕒 {dt.strftime('%d.%m.%Y %H:%M:%S MSK')}**\n\n**📊 Стоки Grow a Garden:**\n\n"
-    text    = header + "".join(format_block(c, stock[c]) for c in ["seeds","gear","egg","event"] )
+    stock = fetch_all_stock()
+    dt = datetime.now(tz=ZoneInfo("Europe/Moscow"))
+    header = f"**🕒 {dt.strftime('%d.%m.%Y %H:%M:%S MSK')}**\n\n**📊 Стоки Grow a Garden:**\n\n"
+    text = header + ''.join(format_block(cat, stock[cat]) for cat in ["seeds", "gear", "egg", "event"] )
     await target.reply_markdown(text)
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -131,21 +135,24 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target = update.message
     await target.reply_markdown(format_weather(fetch_weather()))
 
-# Initialize Telegram bot
-telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
-telegram_app.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
-
-# Запуск polling в фоне
-threading.Thread(target=lambda: telegram_app.run_polling(), daemon=True).start()
-
 # Flask healthcheck
 app = Flask(__name__)
 @app.route("/")
 def healthcheck():
     return "Bot is running!"
 
-if __name__ == "__main__":
+# Запуск Flask в отдельном потоке
+def run_flask():
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
+# Initialize and start bot polling
+if __name__ == "__main__":
+    # Start Flask server
+    threading.Thread(target=run_flask, daemon=True).start()
+    # Start Telegram polling (main thread)
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
+    application.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
+    application.run_polling()
