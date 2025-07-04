@@ -16,10 +16,10 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # Endpoints
 GEAR_SEEDS_URL   = "https://growagardenstock.com/api/stock?type=gear-seeds"
-EGG_URL           = "https://growagardenstock.com/api/stock?type=egg"
-EVENT_URL         = "https://growagardenstock.com/api/special-stock?type=honey"
-COSMETIC_URL      = "https://growagardenstock.com/api/special-stock?type=cosmetics"
-WEATHER_URL       = "https://growagardenstock.com/api/stock/weather"
+EGG_URL          = "https://growagardenstock.com/api/stock?type=egg"
+EVENT_URL        = "https://growagardenstock.com/api/special-stock?type=honey"
+COSMETIC_URL     = "https://growagardenstock.com/api/special-stock?type=cosmetics"
+WEATHER_URL      = "https://growagardenstock.com/api/stock/weather"
 
 # Emoji mappings
 CATEGORY_EMOJI = {
@@ -30,9 +30,8 @@ CATEGORY_EMOJI = {
     "cosmetic":   "💄",
     "weather":    "☁️"
 }
-
 ITEM_EMOJI = {
-     # Seeds
+    # Seeds
     "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "tomato": "🍅", "banana": "🍌",
     "cauliflower": "🥦", "watermelon": "🍉", "rafflesia": "🌺", "green_apple": "🍏",
     "avocado": "🥑", "pineapple": "🍍", "kiwi": "🥝", "bell_pepper": "🌶️",
@@ -113,15 +112,15 @@ def format_weather(data: dict) -> str:
     if ends:
         try:
             t = datetime.strptime(ends, "%H:%M") + timedelta(hours=3)
-            ends_str = t.strftime("%H:%M")
+            ends_str = t.strftime("%H:%M") + " MSK"
         except:
-            ends_str = ends
-    parts = [f"**━ {icon} Погода ━**", f"**Текущая:** {curr}"]
+            ends_str = ends + " MSK"
+    lines = [f"━ {icon} Погода ━", f"**Текущая:** {curr}"]
     if ends_str:
-        parts.append(f"**Заканчивается в:** {ends_str}")
+        lines.append(f"**Заканчивается в:** {ends_str}")
     if dur:
-        parts.append(f"**Длительность:** {dur}")
-    return "\n".join(parts)
+        lines.append(f"**Длительность:** {dur}")
+    return "\n".join(lines)
 
 # Keyboard layout
 def get_keyboard():
