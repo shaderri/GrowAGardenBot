@@ -106,16 +106,16 @@ def format_block(category: str, items: list) -> str:
 def format_weather(data: dict) -> str:
     icon = data.get("icon", "☁️")
     curr = data.get("currentWeather", "--")
-    ends = data.get("ends")
+    end_ms = data.get("endTime")
     dur = data.get("duration")
     ends_str = None
-    if ends:
+    if end_ms:
         try:
-            t = datetime.strptime(ends, "%H:%M") + timedelta(hours=3)
-            ends_str = t.strftime("%H:%M") + " MSK"
+            dt = datetime.fromtimestamp(end_ms / 1000, tz=ZoneInfo("UTC")).astimezone(ZoneInfo("Europe/Moscow"))
+            ends_str = dt.strftime("%H:%M MSK")
         except:
-            ends_str = ends + " MSK"
-    lines = [f"━ {icon} Погода ━", f"**Текущая:** {curr}"]
+            ends_str = "--"
+    lines = [f"━ {icon} **Погода** ━", f"**Текущая:** {curr}"]
     if ends_str:
         lines.append(f"**Заканчивается в:** {ends_str}")
     if dur:
