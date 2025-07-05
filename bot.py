@@ -12,8 +12,7 @@ import threading
 # Load environment
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-# Supabase API key
-SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY") or "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+API_KEY = os.getenv("API_KEY")
 
 # Endpoints
 SEEDS_API = (
