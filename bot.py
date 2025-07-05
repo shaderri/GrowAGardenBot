@@ -1,6 +1,5 @@
 import os
 import requests
-import re
 from datetime import datetime
 from dotenv import load_dotenv
 from flask import Flask
@@ -12,28 +11,10 @@ import threading
 # Load environment
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_KEY = os.getenv("API_KEY")
 
-# Endpoints
-SEEDS_API = (
-    "https://vextbzatpprnksyutbcp.supabase.co/rest/v1/growagarden_stock?"
-    "select=*&type=eq.seeds_stock&active=eq.true&order=created_at.desc"
-)
-GEAR_API = (
-    "https://vextbzatpprnksyutbcp.supabase.co/rest/v1/growagarden_stock?"
-    "select=*&type=eq.gear_stock&active=eq.true&order=created_at.desc"
-)
-EGG_API = (
-    "https://vextbzatpprnksyutbcp.supabase.co/rest/v1/growagarden_stock?"
-    "select=*&type=eq.egg_stock&active=eq.true&order=created_at.desc"
-)
-COSMETIC_API = "https://growagardenstock.com/api/special-stock?type=cosmetics"
+# New stock endpoint
+STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
 WEATHER_API = "https://api.joshlei.com/v2/growagarden/weather"
-
-HEADERS = {
-    "apikey": API_KEY,
-    "Authorization": f"Bearer {API_KEY}"
-}
 
 # Emoji mappings
 CATEGORY_EMOJI = {
@@ -69,55 +50,35 @@ WEATHER_EMOJI = {
     "jandelstorm": "🌩️", "sandstorm": "🏜️"
 }
 
-# Helpers
-# Supabase parser for JSON stock entries
-def parse_supabase(entries: list) -> list:
-    result = []
-    for e in entries:
-        if isinstance(e, dict):
-            name = e.get("display_name")
-            key = e.get("item_id")
-            qty = e.get("multiplier", 1)
-            if name and key:
-                result.append({"item_id": key, "display_name": name, "quantity": qty})
-    return result
+# Fetch stock from unified endpoint
 
-def parse_stock_entries(entries: list) -> list:
-    parsed = []
-    for entry in entries:
-        m = re.match(r"(.+?) \*\*x(\d+)\*\*", entry)
-        if not m:
-            continue
-        name = m.group(1)
-        qty = int(m.group(2))
-        key = name.lower().replace(" ", "_").replace("'", "")
-        parsed.append({"item_id": key, "display_name": name, "quantity": qty})
-    return parsed
-
-# Fetch functions
 def fetch_all_stock() -> dict:
-    seeds = requests.get(SEEDS_API, headers=HEADERS).json()
-    gear = requests.get(GEAR_API, headers=HEADERS).json()
-    eggs = requests.get(EGG_API, headers=HEADERS).json()
-    return {"seeds": parse_supabase(seeds), "gear": parse_supabase(gear), "egg": parse_supabase(eggs)}
+    r = requests.get(STOCK_API)
+    data = r.json() if r.ok else {}
+    return data  # data contains keys seed_stock, gear_stock, egg_stock, eventshop_stock, cosmetic_stock
 
-def fetch_cosmetic() -> list:
-    cr = requests.get(COSMETIC_API).json()
-    return parse_stock_entries(cr.get("cosmetics", []))
+# Fetch weather
 
 def fetch_weather() -> list:
-    return requests.get(WEATHER_API).json().get("weather", [])
+    r = requests.get(WEATHER_API)
+    return r.json().get("weather", [])
 
-# Formatter functions
-def format_block(category: str, items: list) -> str:
+# Formatters
+
+def format_block(key: str, items: list) -> str:
     if not items:
         return ""
-    emoji = CATEGORY_EMOJI.get(category, "•")
-    lines = [f"━ {emoji} *{category.capitalize()}* ━"]
+    emoji = CATEGORY_EMOJI.get(key, "•")
+    title = key.replace("_stock", "").capitalize()
+    lines = [f"━ {emoji} *{title}* ━"]
     for it in items:
-        em = ITEM_EMOJI.get(it['item_id'], "•")
-        lines.append(f"   {em} {it['display_name']}: x{it['quantity']}")
+        name = it.get("display_name")
+        qty = it.get("quantity", 0)
+        key_id = it.get("item_id")
+        em = ITEM_EMOJI.get(key_id, "•")
+        lines.append(f"   {em} {name}: x{qty}")
     return "\n".join(lines) + "\n\n"
+
 
 def format_weather(weather_list: list) -> str:
     active = next((w for w in weather_list if w.get("active")), None)
@@ -127,14 +88,14 @@ def format_weather(weather_list: list) -> str:
     eid = active.get("weather_id")
     emoji = WEATHER_EMOJI.get(eid, "☁️")
     end_ts = active.get("end_duration_unix", 0)
-    ends_str = datetime.fromtimestamp(end_ts, tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M MSK") if end_ts else "--"
+    ends = datetime.fromtimestamp(end_ts, tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M MSK") if end_ts else "--"
     dur = active.get("duration", 0)
     return (f"━ {emoji} *Погода* ━\n"
             f"*Текущая:* {name}\n"
-            f"*Заканчивается в:* {ends_str}\n"
+            f"*Заканчивается в:* {ends}\n"
             f"*Длительность:* {dur} сек")
 
-# Keyboard layout
+# Keyboard
 def get_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📦 Стоки", callback_data="show_stock")],
@@ -149,20 +110,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgt = update.callback_query.message if update.callback_query else update.message
     if update.callback_query: await update.callback_query.answer()
-    stock = fetch_all_stock()
+    data = fetch_all_stock()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
-    text = f"*🕒 {now}*\n\n*📊 Стоки Grow a Garden:*\n\n"
-    for cat in ["seeds", "gear", "egg"]:
-        text += format_block(cat, stock[cat])
+    text = f"*🕒 {now}*\n\n"
+    # Sections
+    for section in ["seed_stock", "gear_stock", "egg_stock"]:
+        text += format_block(section, data.get(section, []))
     await tgt.reply_markdown(text)
 
 async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgt = update.callback_query.message if update.callback_query else update.message
     if update.callback_query: await update.callback_query.answer()
-    items = fetch_cosmetic()
+    data = fetch_all_stock()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
-    text = f"*🕒 {now}*\n\n*💄 Косметический сток:*\n\n"
-    text += format_block("cosmetic", items)
+    text = f"*🕒 {now}*\n\n"
+    text += format_block("cosmetic_stock", data.get("cosmetic_stock", []))
     await tgt.reply_markdown(text)
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -173,18 +135,17 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Flask healthcheck
 app = Flask(__name__)
 @app.route("/")
-def healthcheck():
-    return "OK"
+def healthcheck(): return "OK"
 
 # Run
 if __name__ == "__main__":
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000))), daemon=True).start()
     bot = ApplicationBuilder().token(BOT_TOKEN).build()
     bot.add_handler(CommandHandler("start", start))
-    bot.add_handler(CommandHandler("stock", handle_stock))
-    bot.add_handler(CommandHandler("cosmetic", handle_cosmetic))
-    bot.add_handler(CommandHandler("weather", handle_weather))
     bot.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
     bot.add_handler(CallbackQueryHandler(handle_cosmetic, pattern="show_cosmetic"))
     bot.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
+    bot.add_handler(CommandHandler("stock", handle_stock))
+    bot.add_handler(CommandHandler("cosmetic", handle_cosmetic))
+    bot.add_handler(CommandHandler("weather", handle_weather))
     bot.run_polling()
