@@ -37,7 +37,7 @@ ITEM_EMOJI = {
     "sign_crate": "📦", "medium_wood_flooring": "🪵", "market_cart": "🛒",
     "yellow_umbrella": "☂️", "hay_bale": "🌾", "brick_stack": "🧱",
     "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️",
-    "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦"
+    "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦","blue_cooler_chest": "🧊", "large_wood_flooring": "🪵", "medium_stone_table": "🗄️", "wood_pile": "🪵", "medium_path_tile": "🛤️", "shovel_grave": "⛏️"
 }
 
 WEATHER_EMOJI = {
@@ -112,10 +112,22 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query: await update.callback_query.answer()
     data = fetch_all_stock()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
-    text = f"*🕒 {now}*\n\n"
+    # Header with time and title
+    text = f"*🕒 {now}*📊 Стоки Grow a Garden:*"
     # Sections
-    for section in ["seed_stock", "gear_stock", "egg_stock"]:
-        text += format_block(section, data.get(section, []))
+    section_map = [("seed_stock", "Seeds"), ("gear_stock", "Gear"), ("egg_stock", "Egg")]
+    for key, title in section_map:
+        items = data.get(key, [])
+        if not items:
+            continue
+        emoji = CATEGORY_EMOJI.get(key, "•")
+        text += f"━ {emoji} *{title}* ━"
+        for it in items:
+            name = it.get("display_name")
+            qty = it.get("quantity", 0)
+            em = ITEM_EMOJI.get(it.get("item_id"), "•")
+            text += f"   {em} {name}: x{qty}"
+        text += ""
     await tgt.reply_markdown(text)
 
 async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
