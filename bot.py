@@ -44,7 +44,8 @@ ITEM_EMOJI = {
     "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "tomato": "🍅", "banana": "🍌",
     "cauliflower": "🥦", "watermelon": "🍉", "rafflesia": "🌺", "green_apple": "🍏",
     "avocado": "🥑", "pineapple": "🍍", "kiwi": "🥝", "bell_pepper": "🌶️",
-    "prickly_pear": "🌵", "loquat": "🍑", "feijoa": "🥝", "pitcher_plant": "🌱", "sugar_apple": "🍎",
+    "prickly_pear": "🌵", "loquat": "🍑", "feijoa": "🥝", "pitcher_plant": "🌱", "sugar_apple": "🍎", "grape": "🍇", "coconut": "🥥", "pumpkin": "🎃", "pepper": "🌶️", "cacao": "🍫", "apple": "🍎", "bamboo": "🎍", "burning_bud": "🌼", "dragon_fruit": "🐲🥭", "orange_tulip": "🌷",
+    "mango": "🥭", "cactus": "🌵", "ember_lily": "🌸", "beanstalk": "🌿", "mushroom": "🍄", "daffodil": "🌼",
     # Gear
     "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
     "basic_sprinkler": "🌦️", "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
@@ -54,7 +55,8 @@ ITEM_EMOJI = {
     # Cosmetics
     "sign_crate": "📦", "medium_wood_flooring": "🪵", "market_cart": "🛒",
     "yellow_umbrella": "☂️", "hay_bale": "🌾", "brick_stack": "🧱",
-    "torch": "🔥"
+    "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️",
+    "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦"
 }
 
 WEATHER_EMOJI = {
