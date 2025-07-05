@@ -68,16 +68,17 @@ WEATHER_EMOJI = {
 }
 
 # Helpers
-def parse_supabase(entries: list) -> list:
-    result = []
-    for e in entries:
-        if isinstance(e, dict):
-            name = e.get("display_name")
-            key = e.get("item_id")
-            qty = e.get("multiplier", 1)
-            if name and key:
-                result.append({"item_id": key, "display_name": name, "quantity": qty})
-    return result
+def parse_stock_entries(entries: list) -> list:
+    parsed = []
+    for entry in entries:
+        m = re.match(r"(.+?) \*\*x(\d+)\*\*", entry)
+        if not m:
+            continue
+        name = m.group(1)
+        qty = int(m.group(2))
+        key = name.lower().replace(" ", "_").replace("'", "")
+        parsed.append({"item_id": key, "display_name": name, "quantity": qty})
+    return parsed
 
 # Fetch functions
 def fetch_all_stock() -> dict:
@@ -88,13 +89,12 @@ def fetch_all_stock() -> dict:
 
 def fetch_cosmetic() -> list:
     cr = requests.get(COSMETIC_API).json()
-    # Parse strings like "Item Name **xN**"
-    return parse_supabase(cr.get("cosmetics", []))
+    return parse_stock_entries(cr.get("cosmetics", []))
 
 def fetch_weather() -> list:
     return requests.get(WEATHER_API).json().get("weather", [])
 
-# Formatters
+# Formatter functions
 def format_block(category: str, items: list) -> str:
     if not items:
         return ""
@@ -147,7 +147,8 @@ async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query: await update.callback_query.answer()
     items = fetch_cosmetic()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
-    text = f"*🕒 {now}*\n\n*💄 Косметический сток:*\n\n" + format_block("cosmetic", items)
+    text = f"*🕒 {now}*\n\n*💄 Косметический сток:*\n\n"
+    text += format_block("cosmetic", items)
     await tgt.reply_markdown(text)
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -158,7 +159,8 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Flask healthcheck
 app = Flask(__name__)
 @app.route("/")
-def healthcheck(): return "OK"
+def healthcheck():
+    return "OK"
 
 # Run
 if __name__ == "__main__":
