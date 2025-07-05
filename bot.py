@@ -35,8 +35,8 @@ COSMETIC_API = "https://growagardenstock.com/api/special-stock?type=cosmetics"
 WEATHER_API = "https://api.joshlei.com/v2/growagarden/weather"
 
 HEADERS = {
-    "apikey": "API_KEY",
-    "Authorization": f"Bearer {"API_KEY"}"
+    "apikey": API_KEY,
+    "Authorization": f"Bearer {API_KEY}"
 }
 
 # Emoji mappings
