@@ -88,7 +88,8 @@ def fetch_all_stock() -> dict:
 
 def fetch_cosmetic() -> list:
     cr = requests.get(COSMETIC_API).json()
-    return parse_supabase([{"item_id": None, "display_name": e.split(' **x')[0], "quantity": int(e.split('**x')[1].strip())} for e in cr.get("cosmetics", [])])
+    # Parse strings like "Item Name **xN**"
+    return parse_supabase(cr.get("cosmetics", []))
 
 def fetch_weather() -> list:
     return requests.get(WEATHER_API).json().get("weather", [])
