@@ -68,6 +68,18 @@ WEATHER_EMOJI = {
 }
 
 # Helpers
+# Supabase parser for JSON stock entries
+def parse_supabase(entries: list) -> list:
+    result = []
+    for e in entries:
+        if isinstance(e, dict):
+            name = e.get("display_name")
+            key = e.get("item_id")
+            qty = e.get("multiplier", 1)
+            if name and key:
+                result.append({"item_id": key, "display_name": name, "quantity": qty})
+    return result
+
 def parse_stock_entries(entries: list) -> list:
     parsed = []
     for entry in entries:
