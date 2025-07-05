@@ -31,7 +31,7 @@ EGG_API      = (
     "https://vextbzatpprnksyutbcp.supabase.co/rest/v1/growagarden_stock?"
     "select=*&type=eq.egg_stock&active=eq.true&order=created_at.desc"
 )
-EVENT_API    = "https://growagardenstock.com/api/special-stock?type=honey"
+# EVENT_API    = "https://growagardenstock.com/api/special-stock?type=honey"
 COSMETIC_API = "https://growagardenstock.com/api/special-stock?type=cosmetics"
 WEATHER_API  = "https://api.joshlei.com/v2/growagarden/weather"
 
@@ -57,14 +57,15 @@ ITEM_EMOJI = {
     "magnifying_glass": "🔍", "tanning_mirror": "🪞", "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝",
     # Eggs
     "common_egg": "🥚", "mythical_egg": "🐣", "bug_egg": "🐣", "common_summer_egg": "🥚", "rare_summer_egg": "🥚", "paradise_egg": "🐣", "bee_egg": "🐣",
-    # Event
-    "summer_seed_pack": "🌞", "delphinium": "🌸", "lily_of_the_valley": "💐", "traveler's_fruit": "✈️", "mutation_spray_burnt": "🔥",
-    "oasis_crate": "🏝️", "oasis_egg": "🥚", "hamster": "🐹",
     # Cosmetics
     "sign_crate": "📦", "medium_wood_flooring": "🪵", "market_cart": "🛒",
     "yellow_umbrella": "☂️", "hay_bale": "🌾", "brick_stack": "🧱",
-    "torch": "🔥", "wood_pile": "🪵", "lemonade_stand": "🍋"
+    "torch": "🔥", "wood_pile": "🪵", "lemonade_stand": "🍋",
+    # Additional cosmetics emojis
+    "shovel": "🕳️", "brown_stone_pillar": "🪨", "large_path_tile": "🛤️",
+    "cooking_pot": "🍲", "large_stone_pad": "🪨", "rock_pile": "⛰️", "bookshelf": "📚"
 }
+
 WEATHER_EMOJI = {
     "rain": "🌧️", "heatwave": "🔥", "summerharvest": "☀️",
     "tornado": "🌪️", "windy": "🌬️", "auroraborealis": "🌌",
@@ -110,13 +111,14 @@ def fetch_all_stock() -> dict:
     seeds = seeds_resp.json() if seeds_resp.headers.get('content-type','').startswith('application/json') else []
     gear = gear_resp.json() if gear_resp.headers.get('content-type','').startswith('application/json') else []
     eggs = eggs_resp.json() if eggs_resp.headers.get('content-type','').startswith('application/json') else []
-    ev = requests.get(EVENT_API).json()
     return {
         "seeds": parse_supabase(seeds),
         "gear": parse_supabase(gear),
         "egg": parse_supabase(eggs),
-        "event": parse_stock_entries(ev.get("honey", []))
+        # "event": parse_stock_entries(ev.get("honey", []))
     }
+    # else []
+    # ev = requests.get(EVENT_API).json()
 
 
 def fetch_cosmetic() -> list:
