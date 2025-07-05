@@ -112,22 +112,10 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query: await update.callback_query.answer()
     data = fetch_all_stock()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
-    # Header with time and title
-    text = f"*🕒 {now}*📊 Стоки Grow a Garden:*"
+    text = f"*🕒 {now}*\n\n"
     # Sections
-    section_map = [("seed_stock", "Seeds"), ("gear_stock", "Gear"), ("egg_stock", "Egg")]
-    for key, title in section_map:
-        items = data.get(key, [])
-        if not items:
-            continue
-        emoji = CATEGORY_EMOJI.get(key, "•")
-        text += f"━ {emoji} *{title}* ━"
-        for it in items:
-            name = it.get("display_name")
-            qty = it.get("quantity", 0)
-            em = ITEM_EMOJI.get(it.get("item_id"), "•")
-            text += f"   {em} {name}: x{qty}"
-        text += ""
+    for section in ["seed_stock", "gear_stock", "egg_stock"]:
+        text += format_block(section, data.get(section, []))
     await tgt.reply_markdown(text)
 
 async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
