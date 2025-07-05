@@ -17,18 +17,15 @@ API_KEY = os.getenv("API_KEY")
 # Endpoints
 SEEDS_API = (
     "https://vextbzatpprnksyutbcp.supabase.co/rest/v1/growagarden_stock?"
-    "select=*&type=eq.seeds_stock&active=eq.true&"
-    "order=created_at.desc"
+    "select=*&type=eq.seeds_stock&active=eq.true&order=created_at.desc"
 )
 GEAR_API = (
     "https://vextbzatpprnksyutbcp.supabase.co/rest/v1/growagarden_stock?"
-    "select=*&type=eq.gear_stock&active=eq.true&"
-    "order=created_at.desc"
+    "select=*&type=eq.gear_stock&active=eq.true&order=created_at.desc"
 )
 EGG_API = (
     "https://vextbzatpprnksyutbcp.supabase.co/rest/v1/growagarden_stock?"
-    "select=*&type=eq.egg_stock&active=eq.true&"
-    "order=created_at.desc"
+    "select=*&type=eq.egg_stock&active=eq.true&order=created_at.desc"
 )
 COSMETIC_API = "https://growagardenstock.com/api/special-stock?type=cosmetics"
 WEATHER_API = "https://api.joshlei.com/v2/growagarden/weather"
@@ -71,7 +68,6 @@ WEATHER_EMOJI = {
 }
 
 # Helpers
-
 def parse_supabase(entries: list) -> list:
     result = []
     for e in entries:
@@ -84,56 +80,46 @@ def parse_supabase(entries: list) -> list:
     return result
 
 # Fetch functions
-
 def fetch_all_stock() -> dict:
     seeds = requests.get(SEEDS_API, headers=HEADERS).json()
     gear = requests.get(GEAR_API, headers=HEADERS).json()
     eggs = requests.get(EGG_API, headers=HEADERS).json()
-    return {
-        "seeds": parse_supabase(seeds),
-        "gear": parse_supabase(gear),
-        "egg": parse_supabase(eggs)
-    }
-
+    return {"seeds": parse_supabase(seeds), "gear": parse_supabase(gear), "egg": parse_supabase(eggs)}
 
 def fetch_cosmetic() -> list:
     cr = requests.get(COSMETIC_API).json()
     return parse_supabase([{"item_id": None, "display_name": e.split(' **x')[0], "quantity": int(e.split('**x')[1].strip())} for e in cr.get("cosmetics", [])])
 
-
 def fetch_weather() -> list:
     return requests.get(WEATHER_API).json().get("weather", [])
 
 # Formatters
-
 def format_block(category: str, items: list) -> str:
     if not items:
         return ""
     emoji = CATEGORY_EMOJI.get(category, "•")
-    title = category.capitalize()
-    lines = [f"━ {emoji} *{title}* ━"]
+    lines = [f"━ {emoji} *{category.capitalize()}* ━"]
     for it in items:
         em = ITEM_EMOJI.get(it['item_id'], "•")
         lines.append(f"   {em} {it['display_name']}: x{it['quantity']}")
     return "\n".join(lines) + "\n\n"
 
-
 def format_weather(weather_list: list) -> str:
     active = next((w for w in weather_list if w.get("active")), None)
     if not active:
-        return "**━ ☁️ Погода ━**\nНет активных погодных событий"
+        return "━ ☁️ *Погода* ━\nНет активных погодных событий"
     name = active.get("weather_name")
-    emoji = WEATHER_EMOJI.get(active.get("weather_id"), "☁️")
+    eid = active.get("weather_id")
+    emoji = WEATHER_EMOJI.get(eid, "☁️")
     end_ts = active.get("end_duration_unix", 0)
     ends_str = datetime.fromtimestamp(end_ts, tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M MSK") if end_ts else "--"
     dur = active.get("duration", 0)
-    return ("━ {emoji} *Погода* ━\n"
+    return (f"━ {emoji} *Погода* ━\n"
             f"*Текущая:* {name}\n"
             f"*Заканчивается в:* {ends_str}\n"
             f"*Длительность:* {dur} сек")
 
 # Keyboard layout
-
 def get_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📦 Стоки", callback_data="show_stock")],
@@ -147,19 +133,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgt = update.callback_query.message if update.callback_query else update.message
-    if update.callback_query: 
-        await update.callback_query.answer()
+    if update.callback_query: await update.callback_query.answer()
     stock = fetch_all_stock()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
     text = f"*🕒 {now}*\n\n*📊 Стоки Grow a Garden:*\n\n"
     for cat in ["seeds", "gear", "egg"]:
-        text += format_block(cat, stock.get(cat, []))
+        text += format_block(cat, stock[cat])
     await tgt.reply_markdown(text)
 
 async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgt = update.callback_query.message if update.callback_query else update.message
-    if update.callback_query: 
-        await update.callback_query.answer()
+    if update.callback_query: await update.callback_query.answer()
     items = fetch_cosmetic()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
     text = f"*🕒 {now}*\n\n*💄 Косметический сток:*\n\n" + format_block("cosmetic", items)
@@ -167,22 +151,17 @@ async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgt = update.callback_query.message if update.callback_query else update.message
-    if update.callback_query: 
-        await update.callback_query.answer()
+    if update.callback_query: await update.callback_query.answer()
     await tgt.reply_markdown(format_weather(fetch_weather()))
 
 # Flask healthcheck
 app = Flask(__name__)
 @app.route("/")
-def healthcheck():
-    return "OK"
+def healthcheck(): return "OK"
 
 # Run
 if __name__ == "__main__":
-    threading.Thread(
-        target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000))),
-        daemon=True
-    ).start()
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000))), daemon=True).start()
     bot = ApplicationBuilder().token(BOT_TOKEN).build()
     bot.add_handler(CommandHandler("start", start))
     bot.add_handler(CommandHandler("stock", handle_stock))
