@@ -60,6 +60,16 @@ ITEM_EMOJI = {
     "torch": "🔥"
 }
 
+WEATHER_EMOJI = {
+    "rain": "🌧️", "heatwave": "🔥", "summerharvest": "☀️",
+    "tornado": "🌪️", "windy": "🌬️", "auroraborealis": "🌌",
+    "tropicalrain": "🌴🌧️", "nightevent": "🌙", "sungod": "☀️",
+    "megaharvest": "🌾", "gale": "🌬️", "thunderstorm": "⛈️",
+    "bloodmoonevent": "🌕🩸", "meteorshower": "☄️", "spacetravel": "🪐",
+    "disco": "💃", "djjhai": "🎵", "blackhole": "🕳️",
+    "jandelstorm": "🌩️", "sandstorm": "🏜️"
+}
+
 # Helpers
 
 def parse_supabase(entries: list) -> list:
