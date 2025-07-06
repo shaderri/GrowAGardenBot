@@ -36,8 +36,7 @@ ITEM_EMOJI = {
     # Cosmetics
     "sign_crate": "📦", "medium_wood_flooring": "🪵", "market_cart": "🛒",
     "yellow_umbrella": "☂️", "hay_bale": "🌾", "brick_stack": "🧱",
-    "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️",
-    "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦","blue_cooler_chest": "🧊", "large_wood_flooring": "🪵", "medium_stone_table": "🗄️", "wood_pile": "🪵", "medium_path_tile": "🛤️", "shovel_grave": "⛏️"
+    "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️", "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦", "blue_cooler_chest": "🧊", "large_wood_flooring": "🪚", "medium_stone_table": "🪨", "wood_pile": "🪵", "medium_path_tile": "🛤️", "shovel_grave": "⛏️", "frog_fountain": "🐸", "small_stone_lantern": "🕯️", "small_wood_table": "🪑", "medium_circle_tile": "🔘", "small_path_tile": "🔹", "mini_tv": "📺", "rock_pile": "🗿", "brown_stone_pillar": "🧱", "red_cooler_chest": "🧊", "bookshelf": "📚", "brown_bench": "🪑", "log_bench": "🪵"
 }
 
 WEATHER_EMOJI = {
