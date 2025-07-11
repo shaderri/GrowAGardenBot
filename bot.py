@@ -22,11 +22,11 @@ CATEGORY_EMOJI = {
 }
 ITEM_EMOJI = {
     # Seeds
-    "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "tomato": "🍅", "banana": "🍌",
-    "cauliflower": "🥦", "watermelon": "🍉", "rafflesia": "🌺", "green_apple": "🍏",
-    "avocado": "🥑", "pineapple": "🍍", "kiwi": "🥝", "bell_pepper": "🌶️",
-    "prickly_pear": "🌵", "loquat": "🍑", "feijoa": "🥝", "pitcher_plant": "🌱", "sugar_apple": "🍎", "grape": "🍇", "coconut": "🥥", "pumpkin": "🎃", "pepper": "🌶️", "cacao": "🍫", "apple": "🍎", "bamboo": "🎍", "burning_bud": "🌼", "dragon_fruit": "🐲🥭", "orange_tulip": "🌷",
-    "mango": "🥭", "cactus": "🌵", "ember_lily": "🌸", "beanstalk": "🌿", "mushroom": "🍄", "daffodil": "🌼",
+    "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "orange_tulip": "🌷", "tomato": "🍅",
+    "daffodil": "🌼", "watermelon": "🍉", "pumpkin": "🎃", "apple": "🍎", "bamboo": "🎍",
+    "coconut": "🥥", "cactus": "🌵", "dragon_fruit": "🐲", "mango": "🥭", "grape": "🍇",
+    "mushroom": "🍄", "pepper": "🌶️", "cacao": "🍫", "beanstalk": "🌿", "ember_lily": "🌸",
+    "sugar_apple": "🍏", "burning_bud": "🔥",
     # Gear
     "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
     "basic_sprinkler": "🌦️", "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
