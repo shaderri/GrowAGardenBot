@@ -188,7 +188,7 @@ async def monitor_stock(app):
                     msg = (
     f"*{ITEM_EMOJI[iid]} {it.get('display_name')}: x{qty} в стоке!*\n"
     f"🕒 {ts}\n"
-    f"\n*[@GroowAGarden](https://t.me/GroowAGarden)*"
+    f"\n*@GroowAGarden*"
 )
                     logging.info(f"Notify {iid} x{qty}")
                     await app.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
