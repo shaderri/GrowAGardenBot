@@ -4,13 +4,14 @@ import threading
 import time
 import logging
 import requests
+import imghdr  # ensure standard library module available
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
 from zoneinfo import ZoneInfo
 
-# Setup logging\logr = logging.getLogger()
+# Setup logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # Load environment variables
@@ -73,6 +74,7 @@ def fetch_all_stock():
         logging.error("Error fetching stock: %s", e)
         return {}
 
+
 def fetch_weather():
     try:
         r = requests.get(WEATHER_API, timeout=10)
@@ -93,6 +95,7 @@ def format_block(key: str, items: list) -> str:
         em = ITEM_EMOJI.get(it.get('item_id'), "•")
         lines.append(f"   {em} {it.get('display_name')}: x{it.get('quantity',0)}")
     return "\n".join(lines) + "\n\n"
+
 
 def format_weather_block(weather_list: list) -> str:
     active = next((w for w in weather_list if w.get('active')), None)
@@ -173,14 +176,14 @@ def monitor_stock():
             for it in data.get(sec,[]):
                 iid, qty = it['item_id'], it['quantity']
                 prev = last_seen.get(iid)
-                if prev is not None and qty > 0 and qty != prev:
-                    # notify expensive seeds
-                    if iid in WATCH_ITEMS:
-                        em = ITEM_EMOJI.get(iid, '•')
-                        name = it['display_name']
-                        now = datetime.now(tz=ZoneInfo('Europe/Moscow')).strftime('%d.%m.%Y %H:%M MSK')
-                        msg = f"*{em} {name} в стоке!*🕒 {now}*Grow a Garden News. Подписаться (https://t.me/GroowAGarden)*"
-                        bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
+                if prev is not None and qty > 0 and qty != prev and iid in WATCH_ITEMS:
+                    em = ITEM_EMOJI.get(iid, '•')
+                    name = it['display_name']
+                    now = datetime.now(tz=ZoneInfo('Europe/Moscow')).strftime('%d.%m.%Y %H:%M MSK')
+                    msg = (f"*{em} {name} в стоке!*\n"
+                           f"*🕒 {now}*\n\n"
+                           f"*Grow a Garden News. Подписаться (https://t.me/GroowAGarden)*")
+                    bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
                 last_seen[iid] = qty
         time.sleep(60)
 
@@ -191,8 +194,7 @@ dispatcher.add_handler(CallbackQueryHandler(handle_cosmetic, pattern='show_cosme
 dispatcher.add_handler(CallbackQueryHandler(handle_weather, pattern='show_weather'))
 
 # Start monitoring thread
-th = threading.Thread(target=monitor_stock, daemon=True)
-th.start()
+threading.Thread(target=monitor_stock, daemon=True).start()
 
 # Start the bot
 if __name__ == '__main__':
