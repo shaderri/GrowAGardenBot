@@ -74,14 +74,13 @@ def format_block(key: str, items: list) -> str:
     for it in items:
         em = ITEM_EMOJI.get(it.get("item_id"), "•")
         lines.append(f"   {em} {it.get('display_name')}: x{it.get('quantity',0)}")
-    return
-".join(lines) + "
+    return ".join(lines) + "
 
 
 def format_weather_block(weather_list: list) -> str:
     active = next((w for w in weather_list if w.get("active")), None)
     if not active:
-        return "━ ☁️ *Погода* ━ " \
+        return "━ ☁️ *Погода* ━" \
         "Нет активных погодных событий"
     name = active.get("weather_name")
     eid = active.get("weather_id")
@@ -163,14 +162,21 @@ async def monitor_stock(app):
         await asyncio.sleep(60)
 
 # Build application
-app = ApplicationBuilder().token(BOT_TOKEN).build()
+async def post_init(app):
+    # start background monitor once event loop is running
+    app.create_task(monitor_stock(app))
+
+app = (
+    ApplicationBuilder()
+    .token(BOT_TOKEN)
+    .post_init(post_init)
+    .build()
+)
 # Register handlers
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
 app.add_handler(CallbackQueryHandler(handle_cosmetic, pattern="show_cosmetic"))
 app.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
-# Start monitoring task
-app.create_task(monitor_stock(app))
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
