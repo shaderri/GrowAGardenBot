@@ -60,7 +60,7 @@ WEATHER_EMOJI = {
 }
 
 # Items to notify about (separate list)
-NOTIFY_ITEMS = ["beanstalk", "ember_lily", "sugar_apple", "burning_bud", "master_sprinkler"]
+NOTIFY_ITEMS = ["carrot", "beanstalk", "ember_lily", "sugar_apple", "burning_bud", "master_sprinkler"]
 
 # APIs
 STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
@@ -185,8 +185,27 @@ async def monitor_stock(app):
             for it in data.get(section, []):
                 iid, qty = it.get("item_id"), it.get("quantity",0)
                 if iid in NOTIFY_ITEMS and qty > 0:
-                    msg = (
+                    msg =  (
                         f"*{ITEM_EMOJI[iid]} {it.get('display_name')}: x{qty} в стоке!*"
                         f"🕒 {ts}"
                         f"*[@GroowAGarden](https://t.me/GroowAGarden)*"
                     )
+                    logging.info(f"Notify {iid} x{qty}")
+                    await app.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
+
+# Application setup
+async def post_init(app):
+    app.create_task(monitor_stock(app))
+
+app = (
+    ApplicationBuilder()
+    .token(BOT_TOKEN)
+    .post_init(post_init)
+    .build()
+)
+# register handlers\app.add_handler(CommandHandler("start", start))\app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))\app.add_handler(CallbackQueryHandler(handle_cosmetic, pattern="show_cosmetic"))\app.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
+
+if __name__ == "__main__":
+    app.run_webhook(listen="0.0.0.0", port=int(os.getenv("PORT",5000)),
+                    webhook_url=f"https://{os.getenv('DOMAIN')}/webhook/{BOT_TOKEN}")
+    print("Listening on port", os.getenv("PORT"))
