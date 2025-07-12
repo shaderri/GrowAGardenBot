@@ -27,36 +27,20 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")  # e.g. "-1001234567890"
 
 # Emoji mappings
-CATEGORY_EMOJI = {
-    "seeds": "🌱", "gear": "🧰", "egg": "🥚", "cosmetic": "💄", "weather": "☁️"
-}
+CATEGORY_EMOJI = {"seeds": "🌱", "gear": "🧰", "egg": "🥚", "cosmetic": "💄", "weather": "☁️"}
 ITEM_EMOJI = {
-    # Seeds
     "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "orange_tulip": "🌷", "tomato": "🍅",
     "daffodil": "🌼", "watermelon": "🍉", "pumpkin": "🎃", "apple": "🍎", "bamboo": "🎍",
     "coconut": "🥥", "cactus": "🌵", "dragon_fruit": "🐲", "mango": "🥭", "grape": "🍇",
     "mushroom": "🍄", "pepper": "🌶️", "cacao": "🍫", "beanstalk": "🌿", "ember_lily": "🌸",
     "sugar_apple": "🍏", "burning_bud": "🔥",
-    # Gear
     "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
     "basic_sprinkler": "🌦️", "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
     "magnifying_glass": "🔍", "tanning_mirror": "🪞", "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝",
-    # Eggs
     "common_egg": "🥚", "mythical_egg": "🐣", "bug_egg": "🐣", "common_summer_egg": "🥚", "rare_summer_egg": "🥚", "paradise_egg": "🐣", "bee_egg": "🐣",
-    # Cosmetics
     "sign_crate": "📦", "medium_wood_flooring": "🪵", "market_cart": "🛒",
     "yellow_umbrella": "☂️", "hay_bale": "🌾", "brick_stack": "🧱",
-    "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️", "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦", "blue_cooler_chest": "🧊", "large_wood_flooring": "🪚", "medium_stone_table": "🪨", "wood_pile": "🪵", "medium_path_tile": "🛤️", "shovel_grave": "⛏️", "frog_fountain": "🐸", "small_stone_lantern": "🕯️", "small_wood_table": "🪑", "medium_circle_tile": "🔘", "small_path_tile": "🔹", "mini_tv": "📺", "rock_pile": "🗿", "brown_stone_pillar": "🧱", "red_cooler_chest": "🧊", "bookshelf": "📚", "brown_bench": "🪑", "log_bench": "🪵"
-}
-
-WEATHER_EMOJI = {
-    "rain": "🌧️", "heatwave": "🔥", "summerharvest": "☀️",
-    "tornado": "🌪️", "windy": "🌬️", "auroraborealis": "🌌",
-    "tropicalrain": "🌴🌧️", "nightevent": "🌙", "sungod": "☀️",
-    "megaharvest": "🌾", "gale": "🌬️", "thunderstorm": "⛈️",
-    "bloodmoonevent": "🌕🩸", "meteorshower": "☄️", "spacetravel": "🪐",
-    "disco": "💃", "djjhai": "🎵", "blackhole": "🕳️",
-    "jandelstorm": "🌩️", "sandstorm": "🏜️"
+    "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️", "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦", "blue_cooler_chest": "🧊", "large_wood_flooring": "🪚", "medium_stone_table": "🪨", "wood_pile": "🪵", "medium_path_tile": "🛤️", "shovel_grave": "⛏️", "frog_fountain": "🐸", "small_stone_lantern": "🕯️", "small_wood_table": "🪑", "medium_circle_tile": "🔘", "small_path_tile": "🔹", "mini_tv": "📺", "rock_pile": "🗿", "brown_stone_pillar": "🧱", "bookshelf": "📚"
 }
 
 WATCH_ITEMS = [
@@ -68,7 +52,16 @@ WATCH_ITEMS = [
     "carrot"
 ]
 
-WATCH_ITEMS = list(WATCH_ITEMS.keys())
+WEATHER_EMOJI = {
+    "rain": "🌧️", "heatwave": "🔥", "summerharvest": "☀️",
+    "tornado": "🌪️", "windy": "🌬️", "auroraborealis": "🌌",
+    "tropicalrain": "🌴🌧️", "nightevent": "🌙", "sungod": "☀️",
+    "megaharvest": "🌾", "gale": "🌬️", "thunderstorm": "⛈️",
+    "bloodmoonevent": "🌕🩸", "meteorshower": "☄️", "spacetravel": "🪐",
+    "disco": "💃", "djjhai": "🎵", "blackhole": "🕳️",
+    "jandelstorm": "🌩️", "sandstorm": "🏜️"
+}
+
 last_seen = {item: None for item in WATCH_ITEMS}
 
 # APIs
@@ -182,18 +175,15 @@ async def monitor_stock(app):
             for it in data.get(sec, []):
                 iid, qty = it["item_id"], it.get("quantity", 0)
                 prev = last_seen.get(iid)
-                # notify only on change for watched items
                 if prev is not None and qty > 0 and qty != prev and iid in WATCH_ITEMS:
                     em = ITEM_EMOJI.get(iid, "•")
                     name = it.get("display_name")
-                    # send message with quantity
                     msg = (
-                        f"*{em} {name}: x{qty} в стоке!*"
-                        f"*🕒 {now}*"
-                        f"[**Grow a Garden News. Подписаться**](https://t.me/GroowAGarden)"
+                        f"*{em} {name}: x{qty} в стоке!*\n\n"
+                        f"*🕒 {now}*\n\n"
+                        f"[Grow a Garden News. Подписаться](https://t.me/GroowAGarden)"
                     )
                     await app.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
-                # update last seen
                 last_seen[iid] = qty
         await asyncio.sleep(60)
 
@@ -211,3 +201,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
     app.run_webhook(listen="0.0.0.0", port=port,
                     webhook_url=f"https://{os.getenv('DOMAIN')}/webhook/{BOT_TOKEN}")
+    print(f"Listening on port {port}")
