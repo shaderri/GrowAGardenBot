@@ -20,10 +20,8 @@ from telegram.ext import (
 )
 import time
 
-# Logging
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
-
-# Load environment\load_dotenv()
+# Load environment variables
+load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
@@ -61,7 +59,7 @@ WEATHER_EMOJI = {
 }
 
 # Items to notify about (separate list)
-NOTIFY_ITEMS = ["beanstalk", "ember_lily", "sugar_apple", "burning_bud","giant_pinecone_seed", "master_sprinkler"]
+NOTIFY_ITEMS = ["beanstalk", "ember_lily", "sugar_apple", "burning_bud", "giant_pinecone_seed", "master_sprinkler"]
 
 # APIs
 STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
@@ -124,12 +122,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text("Привет! Выбери действие:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # КД 10 сек на кнопку «Стоки»
+    # Cooldown 10 sec for stock button
     last = context.user_data.get("last_stock", 0)
     if time.time() - last < 10:
-        # показываем всплывающее уведомление и выходим
         await update.callback_query.answer("⏳ Подожди немного прежде чем снова нажать", show_alert=True)
         return
     context.user_data["last_stock"] = time.time()
@@ -145,7 +141,6 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += format_block(sec, data.get(sec, []))
     await tgt.reply_markdown(text)
 
-
 async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     last = context.user_data.get("last_cosmetic", 0)
     if time.time() - last < 10:
@@ -158,10 +153,9 @@ async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         tgt = update.message
     data = fetch_all_stock()
-    now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S MSK")
+    now = datetime.now(tz=ZoneInfo("Europe/Mосква")).strftime("%d.%m.%Y %H:%M:%S MSK")
     text = f"*🕒 {now}*\n\n" + format_block("cosmetic_stock", data.get("cosmetic_stock", []))
     await tgt.reply_markdown(text)
-
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     last = context.user_data.get("last_weather", 0)
@@ -176,6 +170,16 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tgt = update.message
     weather = fetch_weather()
     await tgt.reply_markdown(format_weather_block(weather))
+
+# Command wrappers
+async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await handle_stock(update, context)
+
+async def cosmetic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await handle_cosmetic(update, context)
+
+async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await handle_weather(update, context)
 
 # Notification Task
 def compute_delay():
@@ -206,7 +210,7 @@ async def monitor_stock(app):
                     msg = (
     f"*{ITEM_EMOJI[iid]} {it.get('display_name')}: x{qty} в стоке!*\n"
     f"🕒 {ts}\n"
-    f"\n*@GroowAGarden*"
+    f"\n*@GrowAGarden*"
 )
                     logging.info(f"Notify {iid} x{qty}")
                     await app.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
@@ -221,9 +225,19 @@ app = (
     .post_init(post_init)
     .build()
 )
-# register handlers\app.add_handler(CommandHandler("start", start))\app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))\app.add_handler(CallbackQueryHandler(handle_cosmetic, pattern="show_cosmetic"))\app.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
+# Register handlers
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("stock", stock_command))
+app.add_handler(CommandHandler("cosmetic", cosmetic_command))
+app.add_handler(CommandHandler("weather", weather_command))
+app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
+app.add_handler(CallbackQueryHandler(handle_cosmetic, pattern="show_cosmetic"))
+app.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
 
 if __name__ == "__main__":
-    app.run_webhook(listen="0.0.0.0", port=int(os.getenv("PORT",5000)),
-                    webhook_url=f"https://{os.getenv('DOMAIN')}/webhook/{BOT_TOKEN}")
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.getenv("PORT",5000)),
+        webhook_url=f"https://{os.getenv('DOMAIN')}/webhook/{BOT_TOKEN}"
+    )
     print("Listening on port", os.getenv("PORT"))
