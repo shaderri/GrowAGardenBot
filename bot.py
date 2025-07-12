@@ -18,6 +18,7 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     ContextTypes
 )
+import time
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -125,6 +126,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # КД 10 сек на кнопку «Стоки»
+    last = context.user_data.get("last_stock", 0)
+    if time.time() - last < 10:
+        # показываем всплывающее уведомление и выходим
+        await update.callback_query.answer("⏳ Подожди немного прежде чем снова нажать", show_alert=True)
+        return
+    context.user_data["last_stock"] = time.time()
     if update.callback_query:
         await update.callback_query.answer()
         tgt = update.callback_query.message
@@ -139,6 +147,11 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    last = context.user_data.get("last_cosmetic", 0)
+    if time.time() - last < 10:
+        await update.callback_query.answer("⏳ Подожди немного прежде чем снова нажать", show_alert=True)
+        return
+    context.user_data["last_cosmetic"] = time.time()
     if update.callback_query:
         await update.callback_query.answer()
         tgt = update.callback_query.message
@@ -151,6 +164,11 @@ async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    last = context.user_data.get("last_weather", 0)
+    if time.time() - last < 10:
+        await update.callback_query.answer("⏳ Подожди немного прежде чем снова нажать", show_alert=True)
+        return
+    context.user_data["last_weather"] = time.time()
     if update.callback_query:
         await update.callback_query.answer()
         tgt = update.callback_query.message
