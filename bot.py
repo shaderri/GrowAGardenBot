@@ -29,14 +29,36 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")  # e.g. "-1001234567890"
 
 # Emoji mappings
 CATEGORY_EMOJI = {"seeds": "🌱", "gear": "🧰", "egg": "🥚", "cosmetic": "💄", "weather": "☁️"}
+
 ITEM_EMOJI = {
-    "beanstalk": "🌿", "ember_lily": "🌸", "sugar_apple": "🍏",
-    "burning_bud": "🔥", "master_sprinkler": "🌧️"
+    # Seeds
+    "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "orange_tulip": "🌷", "tomato": "🍅",
+    "daffodil": "🌼", "watermelon": "🍉", "pumpkin": "🎃", "apple": "🍎", "bamboo": "🎍",
+    "coconut": "🥥", "cactus": "🌵", "dragon_fruit": "🐲", "mango": "🥭", "grape": "🍇",
+    "mushroom": "🍄", "pepper": "🌶️", "cacao": "🍫", "beanstalk": "🌿", "ember_lily": "🌸",
+    "sugar_apple": "🍏", "burning_bud": "🔥",
+    # Gear
+    "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
+    "basic_sprinkler": "🌦️", "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
+    "magnifying_glass": "🔍", "tanning_mirror": "🪞", "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝",
+    # Eggs
+    "common_egg": "🥚", "mythical_egg": "🐣", "bug_egg": "🐣", "common_summer_egg": "🥚", "rare_summer_egg": "🥚", "paradise_egg": "🐣", "bee_egg": "🐣",
+    # Cosmetics
+    "sign_crate": "📦", "medium_wood_flooring": "🪵", "market_cart": "🛒",
+    "yellow_umbrella": "☂️", "hay_bale": "🌾", "brick_stack": "🧱",
+    "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️", "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦", "blue_cooler_chest": "🧊", "large_wood_flooring": "🪚", "medium_stone_table": "🪨", "wood_pile": "🪵", "medium_path_tile": "🛤️", "shovel_grave": "⛏️", "frog_fountain": "🐸", "small_stone_lantern": "🕯️", "small_wood_table": "🪑", "medium_circle_tile": "🔘", "small_path_tile": "🔹", "mini_tv": "📺", "rock_pile": "🗿", "brown_stone_pillar": "🧱", "red_cooler_chest": "🧊", "bookshelf": "📚", "brown_bench": "🪑", "log_bench": "🪵"
 }
+
 WEATHER_EMOJI = {
     "rain": "🌧️", "heatwave": "🔥", "summerharvest": "☀️",
-    "tornado": "🌪️", "windy": "🌬️", "auroraborealis": "🌌"
+    "tornado": "🌪️", "windy": "🌬️", "auroraborealis": "🌌",
+    "tropicalrain": "🌴🌧️", "nightevent": "🌙", "sungod": "☀️",
+    "megaharvest": "🌾", "gale": "🌬️", "thunderstorm": "⛈️",
+    "bloodmoonevent": "🌕🩸", "meteorshower": "☄️", "spacetravel": "🪐",
+    "disco": "💃", "djjhai": "🎵", "blackhole": "🕳️",
+    "jandelstorm": "🌩️", "sandstorm": "🏜️"
 }
+
 WATCH_ITEMS = list(ITEM_EMOJI.keys())
 last_seen = {item: None for item in WATCH_ITEMS}
 
@@ -137,7 +159,6 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Notification Task
 async def monitor_stock(app):
-    # monitoring loop: check at each 5-minute interval at second=7
     # initial population of last_seen
     data = fetch_all_stock()
     for sec in ["seed_stock","gear_stock","egg_stock","cosmetic_stock"]:
@@ -148,7 +169,7 @@ async def monitor_stock(app):
 
     while True:
         now_dt = datetime.now(tz=ZoneInfo("Europe/Moscow"))
-        # calculate next run time at minute multiples of 5 and second = 7
+        # next check at next multiple of 5 minutes, at second 7
         minute = now_dt.minute
         next_min = ((minute // 5) + 1) * 5
         next_hour = now_dt.hour
@@ -158,7 +179,8 @@ async def monitor_stock(app):
         next_run = now_dt.replace(hour=next_hour, minute=next_min, second=7, microsecond=0)
         delay = (next_run - now_dt).total_seconds()
         if delay < 0:
-            delay += 24*3600
+            delay += 24 * 3600
+        logging.info(f"Sleeping for {delay:.1f}s until next run at {next_run.time()}")
         await asyncio.sleep(delay)
 
         # perform stock check
@@ -174,8 +196,8 @@ async def monitor_stock(app):
                         f"{em} {name}: x{qty} в стоке!🕒 {run_time}"
                         f"@GroowAGarden"
                     )
+                    logging.info(f"Sending notification for {iid}: {qty}")
                     await app.bot.send_message(chat_id=CHANNEL_ID, text=msg)
-
 
 # Build application
 async def post_init(app):
