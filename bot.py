@@ -59,7 +59,16 @@ WEATHER_EMOJI = {
     "jandelstorm": "🌩️", "sandstorm": "🏜️"
 }
 
-WATCH_ITEMS = list(ITEM_EMOJI.keys())
+WATCH_ITEMS = [
+    "beanstalk",
+    "ember_lily",
+    "sugar_apple",
+    "burning_bud",
+    "master_sprinkler",
+    "carrot"
+]
+
+WATCH_ITEMS = list(WATCH_ITEMS.keys())
 last_seen = {item: None for item in WATCH_ITEMS}
 
 # APIs
@@ -181,7 +190,7 @@ async def monitor_stock(app):
                     msg = (
                         f"*{em} {name}: x{qty} в стоке!*"
                         f"*🕒 {now}*"
-                        f"[*Grow a Garden News. Подписаться*](https://t.me/GroowAGarden)"
+                        f"[**Grow a Garden News. Подписаться**](https://t.me/GroowAGarden)"
                     )
                     await app.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
                 # update last seen
