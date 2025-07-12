@@ -1,9 +1,18 @@
 # bot.py
 import os
+import types
+# Ensure imghdr module exists for telegram
+try:
+    import imghdr
+except ImportError:
+    imghdr = types.ModuleType('imghdr')
+    imghdr.what = lambda *args, **kwargs: None
+
 import threading
 import time
 import logging
 import requests
+import imghdr  # ensure standard library module available
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
