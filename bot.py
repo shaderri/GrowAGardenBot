@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import threading
 
 # Load environment
+# authors: Shaderri
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -18,7 +19,7 @@ STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
 WEATHER_API = "https://api.joshlei.com/v2/growagarden/weather"
 
 # Cooldown settings
-COOLDOWN_SECONDS = 5  # изменено с 10 на 5
+COOLDOWN_SECONDS = 5
 last_invocation = {}  # {user_id: timestamp}
 
 # Emoji mappings
@@ -57,92 +58,71 @@ WEATHER_EMOJI = {
     "jandelstorm": "🌩️", "sandstorm": "🏜️"
 }
 
-# Fetch stock from unified endpoint
-def fetch_all_stock() -> dict:
-    r = requests.get(STOCK_API)
-    return r.json() if r.ok else {}
-
-# Fetch weather
-def fetch_weather() -> list:
-    r = requests.get(WEATHER_API)
-    return r.json().get("weather", [])
+# Fetchers
+def fetch_all_stock(): return requests.get(STOCK_API).json() if requests.get(STOCK_API).ok else {}
+def fetch_weather(): return requests.get(WEATHER_API).json().get("weather", [])
 
 # Cooldown checker
 def check_cooldown(user_id: int) -> bool:
-    now = time.time()
-    last = last_invocation.get(user_id, 0)
-    if now - last < COOLDOWN_SECONDS:
-        return False
-    last_invocation[user_id] = now
-    return True
+    now = time.time(); last = last_invocation.get(user_id, 0)
+    if now - last < COOLDOWN_SECONDS: return False
+    last_invocation[user_id] = now; return True
 
-# Formatters remain unchanged
-# ... format_block, format_weather, get_keyboard ...
+# Formatters:
+def format_block(key, items):
+    if not items: return ""
+    emoji, title = CATEGORY_EMOJI.get(key,"•"), key.replace("_stock","").capitalize()
+    lines = [f"━ {emoji} *{title}* ━"]
+    for it in items:
+        em = ITEM_EMOJI.get(it.get("item_id"),"•"); lines.append(f"   {em} {it.get('display_name')}: x{it.get('quantity',0)}")
+    return "\n".join(lines)+"\n\n"
+
+def format_weather(weather_list):
+    active = next((w for w in weather_list if w.get("active")), None)
+    if not active: return "━ ☁️ *Погода* ━\nНет активных погодных событий"
+    eid, ends = active.get("weather_id"), datetime.fromtimestamp(active.get("end_duration_unix",0), tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M MSK")
+    return f"━ {WEATHER_EMOJI.get(eid,'☁️')} *Погода* ━\n*Текущая:* {active.get('weather_name')}\n*Заканчивается в:* {ends}\n*Длительность:* {active.get('duration')} сек"
+
+# Keyboard builder
+def get_keyboard(): return InlineKeyboardMarkup([[InlineKeyboardButton("📦 Стоки",callback_data="show_stock")],[InlineKeyboardButton("💄 Косметика",callback_data="show_cosmetic")],[InlineKeyboardButton("☁️ Погода",callback_data="show_weather")]])
 
 # Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # /start всегда отвечает, без кулдауна
     await update.message.reply_text("Привет! Выбери действие:", reply_markup=get_keyboard())
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    tgt = update.callback_query.message if update.callback_query else update.message
-    if not check_cooldown(user_id):
-        return await tgt.reply_text(
-            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом."
-        )
-    if update.callback_query:
-        await update.callback_query.answer()
-    data = fetch_all_stock()
-    now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
-    text = f"*🕒 {now}*\n\n"
-    for section in ["seed_stock", "gear_stock", "egg_stock"]:
-        text += format_block(section, data.get(section, []))
+    user_id = update.effective_user.id; tgt = update.callback_query.message if update.callback_query else update.message
+    if not check_cooldown(user_id): return await tgt.reply_text("⏳ Подождите 5 сек перед повторным запросом.")
+    if update.callback_query: await update.callback_query.answer()
+    data, now = fetch_all_stock(), datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
+    text = f"*🕒 {now}*\n\n"+"".join(format_block(sec, data.get(sec,[])) for sec in ["seed_stock","gear_stock","egg_stock"])
     await tgt.reply_markdown(text)
 
 async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    tgt = update.callback_query.message if update.callback_query else update.message
-    if not check_cooldown(user_id):
-        return await tgt.reply_text(
-            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом."
-        )
-    if update.callback_query:
-        await update.callback_query.answer()
-    data = fetch_all_stock()
-    now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
-    text = f"*🕒 {now}*\n\n"
-    text += format_block("cosmetic_stock", data.get("cosmetic_stock", []))
-    await tgt.reply_markdown(text)
+    user_id = update.effective_user.id; tgt = update.callback_query.message if update.callback_query else update.message
+    if not check_cooldown(user_id): return await tgt.reply_text("⏳ Подождите 5 сек перед повторным запросом.")
+    if update.callback_query: await update.callback_query.answer()
+    data, now = fetch_all_stock(), datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
+    await tgt.reply_markdown(f"*🕒 {now}*\n\n"+format_block("cosmetic_stock", data.get("cosmetic_stock",[])))
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    tgt = update.callback_query.message if update.callback_query else update.message
-    if not check_cooldown(user_id):
-        return await tgt.reply_text(
-            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом."
-        )
-    if update.callback_query:
-        await update.callback_query.answer()
+    user_id = update.effective_user.id; tgt = update.callback_query.message if update.callback_query else update.message
+    if not check_cooldown(user_id): return await tgt.reply_text("⏳ Подождите 5 сек перед повторным запросом.")
+    if update.callback_query: await update.callback_query.answer()
     await tgt.reply_markdown(format_weather(fetch_weather()))
 
-# Flask healthcheck and bot setup remain unchanged
+# Healthcheck & bot setup
 app = Flask(__name__)
 @app.route("/")
-def healthcheck():
-    return "OK"
+def healthcheck(): return "OK"
 
-if __name__ == "__main__":
-    threading.Thread(
-        target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000))),
-        daemon=True
-    ).start()
-    bot = ApplicationBuilder().token(BOT_TOKEN).build()
-    bot.add_handler(CommandHandler("start", start))
-    bot.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
-    bot.add_handler(CallbackQueryHandler(handle_cosmetic, pattern="show_cosmetic"))
-    bot.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
-    bot.add_handler(CommandHandler("stock", handle_stock))
-    bot.add_handler(CommandHandler("cosmetic", handle_cosmetic))
-    bot.add_handler(CommandHandler("weather", handle_weather))
-    bot.run_polling()
+if __name__=="__main__":
+    threading.Thread(target=lambda: app.run(host="0.0.0.0",port=int(os.getenv("PORT",5000))),daemon=True).start()
+    app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
+    for cmd, fn in [("start",start),("stock",handle_stock),("cosmetic",handle_cosmetic),("weather",handle_weather)]:
+        app_bot.add_handler(CommandHandler(cmd, fn))
+    app_bot.add_handler(CallbackQueryHandler(handle_stock,pattern="show_stock"))
+    app_bot.add_handler(CallbackQueryHandler(handle_cosmetic,pattern="show_cosmetic"))
+    app_bot.add_handler(CallbackQueryHandler(handle_weather,pattern="show_weather"))
+    # Решение конфликта getUpdates
+    app_bot.run_polling(drop_pending_updates=True)
