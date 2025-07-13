@@ -18,7 +18,7 @@ STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
 WEATHER_API = "https://api.joshlei.com/v2/growagarden/weather"
 
 # Cooldown settings
-COOLDOWN_SECONDS = 10
+COOLDOWN_SECONDS = 5
 last_invocation = {}  # {user_id: timestamp}
 
 # Emoji mappings
@@ -112,7 +112,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not check_cooldown(user_id):
         return await update.message.reply_text(
-            "⏳ Пожалуйста, подождите 10 секунд перед повторным запросом.")
+            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом.")
     await update.message.reply_text("Привет! Выбери действие:", reply_markup=get_keyboard())
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -120,7 +120,7 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgt = update.callback_query.message if update.callback_query else update.message
     if not check_cooldown(user_id):
         return await tgt.reply_text(
-            "⏳ Пожалуйста, подождите 10 секунд перед повторным запросом.")
+            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом.")
     if update.callback_query:
         await update.callback_query.answer()
     data = fetch_all_stock()
@@ -135,7 +135,7 @@ async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgt = update.callback_query.message if update.callback_query else update.message
     if not check_cooldown(user_id):
         return await tgt.reply_text(
-            "⏳ Пожалуйста, подождите 10 секунд перед повторным запросом.")
+            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом.")
     if update.callback_query:
         await update.callback_query.answer()
     data = fetch_all_stock()
@@ -149,7 +149,7 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgt = update.callback_query.message if update.callback_query else update.message
     if not check_cooldown(user_id):
         return await tgt.reply_text(
-            "⏳ Пожалуйста, подождите 10 секунд перед повторным запросом.")
+            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом.")
     if update.callback_query:
         await update.callback_query.answer()
     await tgt.reply_markdown(format_weather(fetch_weather()))
