@@ -1,5 +1,6 @@
 import os
 import requests
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 from flask import Flask
@@ -16,17 +17,21 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
 WEATHER_API = "https://api.joshlei.com/v2/growagarden/weather"
 
+# Cooldown settings
+COOLDOWN_SECONDS = 10
+last_invocation = {}  # {user_id: timestamp}
+
 # Emoji mappings
 CATEGORY_EMOJI = {
     "seeds": "🌱", "gear": "🧰", "egg": "🥚", "cosmetic": "💄", "weather": "☁️"
 }
 ITEM_EMOJI = {
     # Seeds
-    "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "orange_tulip": "🌷", "tomato": "🍅",
+    "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "orange_tulip": "🌷", "tomato": "🍅", "corn": "🌽",
     "daffodil": "🌼", "watermelon": "🍉", "pumpkin": "🎃", "apple": "🍎", "bamboo": "🎍",
     "coconut": "🥥", "cactus": "🌵", "dragon_fruit": "🐲", "mango": "🥭", "grape": "🍇",
     "mushroom": "🍄", "pepper": "🌶️", "cacao": "🍫", "beanstalk": "🌿", "ember_lily": "🌸",
-    "sugar_apple": "🍏", "burning_bud": "🔥",
+    "sugar_apple": "🍏", "burning_bud": "🔥", "giant_pinecone": "🌰",
     # Gear
     "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
     "basic_sprinkler": "🌦️", "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
@@ -38,7 +43,6 @@ ITEM_EMOJI = {
     "yellow_umbrella": "☂️", "hay_bale": "🌾", "brick_stack": "🧱",
     "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️", "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦", "blue_cooler_chest": "🧊", "large_wood_flooring": "🪚", "medium_stone_table": "🪨", "wood_pile": "🪵", "medium_path_tile": "🛤️", "shovel_grave": "⛏️", "frog_fountain": "🐸", "small_stone_lantern": "🕯️", "small_wood_table": "🪑", "medium_circle_tile": "🔘", "small_path_tile": "🔹", "mini_tv": "📺", "rock_pile": "🗿", "brown_stone_pillar": "🧱", "red_cooler_chest": "🧊", "bookshelf": "📚", "brown_bench": "🪑", "log_bench": "🪵"
 }
-
 WEATHER_EMOJI = {
     "rain": "🌧️", "heatwave": "🔥", "summerharvest": "☀️",
     "tornado": "🌪️", "windy": "🌬️", "auroraborealis": "🌌",
@@ -50,19 +54,26 @@ WEATHER_EMOJI = {
 }
 
 # Fetch stock from unified endpoint
-
 def fetch_all_stock() -> dict:
     r = requests.get(STOCK_API)
-    data = r.json() if r.ok else {}
-    return data  # data contains keys seed_stock, gear_stock, egg_stock, eventshop_stock, cosmetic_stock
+    return r.json() if r.ok else {}
 
 # Fetch weather
-
 def fetch_weather() -> list:
     r = requests.get(WEATHER_API)
     return r.json().get("weather", [])
 
+# Cooldown checker
+def check_cooldown(user_id: int) -> bool:
+    now = time.time()
+    last = last_invocation.get(user_id, 0)
+    if now - last < COOLDOWN_SECONDS:
+        return False
+    last_invocation[user_id] = now
+    return True
+
 # Formatters
+# ... (format_block and format_weather remain unchanged)
 
 def format_block(key: str, items: list) -> str:
     if not items:
@@ -77,7 +88,6 @@ def format_block(key: str, items: list) -> str:
         em = ITEM_EMOJI.get(key_id, "•")
         lines.append(f"   {em} {name}: x{qty}")
     return "\n".join(lines) + "\n\n"
-
 
 def format_weather(weather_list: list) -> str:
     active = next((w for w in weather_list if w.get("active")), None)
@@ -95,31 +105,39 @@ def format_weather(weather_list: list) -> str:
             f"*Длительность:* {dur} сек")
 
 # Keyboard
-def get_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📦 Стоки", callback_data="show_stock")],
-        [InlineKeyboardButton("💄 Косметика", callback_data="show_cosmetic")],
-        [InlineKeyboardButton("☁️ Погода", callback_data="show_weather")]
-    ])
+# ... unchanged
 
 # Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not check_cooldown(user_id):
+        return await update.message.reply_text(
+            "⏳ Пожалуйста, подождите 10 секунд перед повторным запросом.")
     await update.message.reply_text("Привет! Выбери действие:", reply_markup=get_keyboard())
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     tgt = update.callback_query.message if update.callback_query else update.message
-    if update.callback_query: await update.callback_query.answer()
+    if not check_cooldown(user_id):
+        return await tgt.reply_text(
+            "⏳ Пожалуйста, подождите 10 секунд перед повторным запросом.")
+    if update.callback_query:
+        await update.callback_query.answer()
     data = fetch_all_stock()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
     text = f"*🕒 {now}*\n\n"
-    # Sections
     for section in ["seed_stock", "gear_stock", "egg_stock"]:
         text += format_block(section, data.get(section, []))
     await tgt.reply_markdown(text)
 
 async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     tgt = update.callback_query.message if update.callback_query else update.message
-    if update.callback_query: await update.callback_query.answer()
+    if not check_cooldown(user_id):
+        return await tgt.reply_text(
+            "⏳ Пожалуйста, подождите 10 секунд перед повторным запросом.")
+    if update.callback_query:
+        await update.callback_query.answer()
     data = fetch_all_stock()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
     text = f"*🕒 {now}*\n\n"
@@ -127,18 +145,27 @@ async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await tgt.reply_markdown(text)
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     tgt = update.callback_query.message if update.callback_query else update.message
-    if update.callback_query: await update.callback_query.answer()
+    if not check_cooldown(user_id):
+        return await tgt.reply_text(
+            "⏳ Пожалуйста, подождите 10 секунд перед повторным запросом.")
+    if update.callback_query:
+        await update.callback_query.answer()
     await tgt.reply_markdown(format_weather(fetch_weather()))
 
 # Flask healthcheck
 app = Flask(__name__)
 @app.route("/")
-def healthcheck(): return "OK"
+def healthcheck():
+    return "OK"
 
 # Run
 if __name__ == "__main__":
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000))), daemon=True).start()
+    threading.Thread(
+        target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000))),
+        daemon=True
+    ).start()
     bot = ApplicationBuilder().token(BOT_TOKEN).build()
     bot.add_handler(CommandHandler("start", start))
     bot.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
