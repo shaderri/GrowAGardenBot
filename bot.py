@@ -31,11 +31,11 @@ CATEGORY_EMOJI = {
 }
 ITEM_EMOJI = {
     # Seeds
-    "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "orange_tulip": "🌷", "tomato": "🍅",
+    "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "orange_tulip": "🌷", "tomato": "🍅", "corn": "🌽",
     "daffodil": "🌼", "watermelon": "🍉", "pumpkin": "🎃", "apple": "🍎", "bamboo": "🎍",
     "coconut": "🥥", "cactus": "🌵", "dragon_fruit": "🐲", "mango": "🥭", "grape": "🍇",
     "mushroom": "🍄", "pepper": "🌶️", "cacao": "🍫", "beanstalk": "🌿", "ember_lily": "🌸",
-    "sugar_apple": "🍏", "burning_bud": "🔥", "giant_pinecone_seed": "🌰",
+    "sugar_apple": "🍏", "burning_bud": "🔥", "giant_pinecone": "🌰",
     # Gear
     "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
     "basic_sprinkler": "🌦️", "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
@@ -59,7 +59,7 @@ WEATHER_EMOJI = {
 }
 
 # Items to notify about (separate list)
-NOTIFY_ITEMS = ["beanstalk", "ember_lily", "sugar_apple", "burning_bud", "giant_pinecone_seed", "master_sprinkler"]
+NOTIFY_ITEMS = ["beanstalk", "ember_lily", "sugar_apple", "burning_bud", "giant_pinecone", "master_sprinkler"]
 
 # APIs
 STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
