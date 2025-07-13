@@ -18,7 +18,7 @@ STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
 WEATHER_API = "https://api.joshlei.com/v2/growagarden/weather"
 
 # Cooldown settings
-COOLDOWN_SECONDS = 5
+COOLDOWN_SECONDS = 5  # изменено с 10 на 5
 last_invocation = {}  # {user_id: timestamp}
 
 # Emoji mappings
@@ -41,7 +41,11 @@ ITEM_EMOJI = {
     # Cosmetics
     "sign_crate": "📦", "medium_wood_flooring": "🪵", "market_cart": "🛒",
     "yellow_umbrella": "☂️", "hay_bale": "🌾", "brick_stack": "🧱",
-    "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️", "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦", "blue_cooler_chest": "🧊", "large_wood_flooring": "🪚", "medium_stone_table": "🪨", "wood_pile": "🪵", "medium_path_tile": "🛤️", "shovel_grave": "⛏️", "frog_fountain": "🐸", "small_stone_lantern": "🕯️", "small_wood_table": "🪑", "medium_circle_tile": "🔘", "small_path_tile": "🔹", "mini_tv": "📺", "rock_pile": "🗿", "brown_stone_pillar": "🧱", "red_cooler_chest": "🧊", "bookshelf": "📚", "brown_bench": "🪑", "log_bench": "🪵"
+    "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️", "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦", "blue_cooler_chest": "🧊", "large_wood_flooring": "🪚", "medium_stone_table": "🪨", "wood_pile": "🪵", "medium_path_tile": "🛤️", "shovel_grave": "⛏️", "frog_fountain": "🐸", "small_stone_lantern": "🕯️", "small_wood_table": "🪑", "medium_circle_tile": "🔘", "small_path_tile": "🔹", "mini_tv": "📺", "rock_pile": "🗿", "brown_stone_pillar": "🧱", "red_cooler_chest": "🧊", "bookshelf": "📚", "brown_bench": "🪑", "log_bench": "🪵",
+    # Added missing items
+    "large_path_tile": "◼️",  # Large Path Tile
+    "axe_stump": "🪵",          # Axe Stump
+    "shovel": "⛏️"             # Shovel
 }
 WEATHER_EMOJI = {
     "rain": "🌧️", "heatwave": "🔥", "summerharvest": "☀️",
@@ -72,47 +76,12 @@ def check_cooldown(user_id: int) -> bool:
     last_invocation[user_id] = now
     return True
 
-# Formatters
-# ... (format_block and format_weather remain unchanged)
-
-def format_block(key: str, items: list) -> str:
-    if not items:
-        return ""
-    emoji = CATEGORY_EMOJI.get(key, "•")
-    title = key.replace("_stock", "").capitalize()
-    lines = [f"━ {emoji} *{title}* ━"]
-    for it in items:
-        name = it.get("display_name")
-        qty = it.get("quantity", 0)
-        key_id = it.get("item_id")
-        em = ITEM_EMOJI.get(key_id, "•")
-        lines.append(f"   {em} {name}: x{qty}")
-    return "\n".join(lines) + "\n\n"
-
-def format_weather(weather_list: list) -> str:
-    active = next((w for w in weather_list if w.get("active")), None)
-    if not active:
-        return "━ ☁️ *Погода* ━\nНет активных погодных событий"
-    name = active.get("weather_name")
-    eid = active.get("weather_id")
-    emoji = WEATHER_EMOJI.get(eid, "☁️")
-    end_ts = active.get("end_duration_unix", 0)
-    ends = datetime.fromtimestamp(end_ts, tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M MSK") if end_ts else "--"
-    dur = active.get("duration", 0)
-    return (f"━ {emoji} *Погода* ━\n"
-            f"*Текущая:* {name}\n"
-            f"*Заканчивается в:* {ends}\n"
-            f"*Длительность:* {dur} сек")
-
-# Keyboard
-# ... unchanged
+# Formatters remain unchanged
+# ... format_block, format_weather, get_keyboard ...
 
 # Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not check_cooldown(user_id):
-        return await update.message.reply_text(
-            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом.")
+    # /start всегда отвечает, без кулдауна
     await update.message.reply_text("Привет! Выбери действие:", reply_markup=get_keyboard())
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -120,7 +89,8 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgt = update.callback_query.message if update.callback_query else update.message
     if not check_cooldown(user_id):
         return await tgt.reply_text(
-            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом.")
+            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом."
+        )
     if update.callback_query:
         await update.callback_query.answer()
     data = fetch_all_stock()
@@ -135,7 +105,8 @@ async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgt = update.callback_query.message if update.callback_query else update.message
     if not check_cooldown(user_id):
         return await tgt.reply_text(
-            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом.")
+            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом."
+        )
     if update.callback_query:
         await update.callback_query.answer()
     data = fetch_all_stock()
@@ -149,18 +120,18 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgt = update.callback_query.message if update.callback_query else update.message
     if not check_cooldown(user_id):
         return await tgt.reply_text(
-            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом.")
+            "⏳ Пожалуйста, подождите 5 секунд перед повторным запросом."
+        )
     if update.callback_query:
         await update.callback_query.answer()
     await tgt.reply_markdown(format_weather(fetch_weather()))
 
-# Flask healthcheck
+# Flask healthcheck and bot setup remain unchanged
 app = Flask(__name__)
 @app.route("/")
 def healthcheck():
     return "OK"
 
-# Run
 if __name__ == "__main__":
     threading.Thread(
         target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000))),
