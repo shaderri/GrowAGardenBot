@@ -41,7 +41,7 @@ ITEM_EMOJI = {
     "basic_sprinkler": "🌦️", "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
     "magnifying_glass": "🔍", "tanning_mirror": "🪞", "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝",
     # Eggs
-    "common_egg": "🥚", "mythical_egg": "🐣", "bug_egg": "🐣", "common_summer_egg": "🥚", "rare_summer_egg": "🥚", "paradise_egg": "🐣", "bee_egg": "🐣",
+    "common_egg": "🥚", "mythical_egg": "🐣", "bug_egg": "🐣", "common_summer_egg": "🥚", "rare_summer_egg": "🥚", "paradise_egg": "🐣",
     # Cosmetics
     "sign_crate": "📦", "medium_wood_flooring": "🪵", "market_cart": "🛒",
     "yellow_umbrella": "☂️", "hay_bale": "🌾", "brick_stack": "🧱",
@@ -59,7 +59,7 @@ WEATHER_EMOJI = {
 }
 
 # Items to notify about (separate list)
-NOTIFY_ITEMS = ["beanstalk", "ember_lily", "sugar_apple", "burning_bud", "giant_pinecone", "master_sprinkler"]
+NOTIFY_ITEMS = [ "grape", "mushroom", "pepper", "cacao","beanstalk", "ember_lily", "sugar_apple", "burning_bud", "giant_pinecone", "master_sprinkler"]
 
 # APIs
 STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
