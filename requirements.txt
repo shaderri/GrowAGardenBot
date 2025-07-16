@@ -2,3 +2,4 @@ python-telegram-bot[webhooks]==22.2
 requests==2.31.0
 python-dotenv==1.0.1
 tzdata>=2023.3
+flask
