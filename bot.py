@@ -48,7 +48,7 @@ ITEM_EMOJI = {
     # Gear
     "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
     "basic_sprinkler": "🌦️", "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
-    "magnifying_glass": "🔍", "tanning_mirror": "🪞", "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝",
+    "magnifying_glass": "🔍", "tanning_mirror": "🪞", "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝", "level_up_lollipop": "🍭",
     # Eggs
     "common_egg": "🥚", "mythical_egg": "🐣", "bug_egg": "🐣", "common_summer_egg": "🥚", "rare_summer_egg": "🥚", "paradise_egg": "🐣",
     # Cosmetics
@@ -68,7 +68,22 @@ WEATHER_EMOJI = {
 }
 
 # Items to notify about (separate list)
-NOTIFY_ITEMS = [ "grape", "mushroom", "pepper", "cacao","beanstalk", "ember_lily", "sugar_apple", "burning_bud", "giant_pinecone", "master_sprinkler"]
+NOTIFY_ITEMS = [ "grape", "mushroom", "pepper", "cacao","beanstalk", "ember_lily", "sugar_apple", "burning_bud", "giant_pinecone", "master_sprinkler", "level_up_lollipop"]
+
+# # Цены для уведомлений (в ¢)
+# PRICE_MAP = {
+#     "grape": 850_000,
+#     "mushroom": 150_000,
+#     "pepper": 1_000_000,
+#     "cacao": 2_500_000,
+#     "beanstalk": 10_000_000,
+#     "ember_lily": 15_000_000,
+#     "sugar_apple": 25_000_000,
+#     "burning_bud": 40_000_000,
+#     "giant_pinecone": 55_000_000,
+#     "master_sprinkler": 10_000_000,
+#     "level_up_lollipop": 10_000_000_000,
+# }
 
 # APIs
 STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
