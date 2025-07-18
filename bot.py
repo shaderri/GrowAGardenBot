@@ -71,19 +71,19 @@ WEATHER_EMOJI = {
 NOTIFY_ITEMS = [ "grape", "mushroom", "pepper", "cacao","beanstalk", "ember_lily", "sugar_apple", "burning_bud", "giant_pinecone", "master_sprinkler", "level_up_lollipop"]
 
 # # Цены для уведомлений (в ¢)
-# PRICE_MAP = {
-#     "grape": 850_000,
-#     "mushroom": 150_000,
-#     "pepper": 1_000_000,
-#     "cacao": 2_500_000,
-#     "beanstalk": 10_000_000,
-#     "ember_lily": 15_000_000,
-#     "sugar_apple": 25_000_000,
-#     "burning_bud": 40_000_000,
-#     "giant_pinecone": 55_000_000,
-#     "master_sprinkler": 10_000_000,
-#     "level_up_lollipop": 10_000_000_000,
-# }
+PRICE_MAP = {
+    "grape": 850_000,
+    "mushroom": 150_000,
+    "pepper": 1_000_000,
+    "cacao": 2_500_000,
+    "beanstalk": 10_000_000,
+    "ember_lily": 15_000_000,
+    "sugar_apple": 25_000_000,
+    "burning_bud": 40_000_000,
+    "giant_pinecone": 55_000_000,
+    "master_sprinkler": 10_000_000,
+    "level_up_lollipop": 10_000_000_000,
+}
 
 # APIs
 STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
@@ -231,11 +231,14 @@ async def monitor_stock(app):
             for it in data.get(section, []):
                 iid, qty = it.get("item_id"), it.get("quantity",0)
                 if iid in NOTIFY_ITEMS and qty > 0:
+                    # Получаем и форматируем цену
+                    price = PRICE_MAP.get(iid)
+                    price_str = f"{price:,}¢" if price is not None else "—"
                     msg = (
-    f"*{ITEM_EMOJI[iid]} {it.get('display_name')}: x{qty} в стоке!*\n"
-    f"🕒 {ts}\n"
-    f"\n*@GroowAGarden*"
-)
+                        f"*{ITEM_EMOJI[iid]} {it.get('display_name')}: x{qty} в стоке!*\n"
+                        f"💰 Цена — {price_str}\n"
+                        f"🕒 {ts}\n"
+                        f"\n*@GroowAGarden*")
                     logging.info(f"Notify {iid} x{qty}")
                     await app.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
 
