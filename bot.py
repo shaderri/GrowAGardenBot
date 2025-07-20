@@ -62,10 +62,10 @@ WEATHER_EMOJI = {
 }
 
 TITLE_MAP = {
-    "seed_stock": "Seeds",
-    "gear_stock": "Gear",
-    "egg_stock": "Eggs",
-    "eventshop_stock": "Zen-event",
+    "seed_stock": "*Seeds*",
+    "gear_stock": "*Gear*",
+    "egg_stock": "*Eggs*",
+    "eventshop_stock": "*Zen-event*",
 }
 
 # Fetchers
