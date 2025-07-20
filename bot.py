@@ -24,9 +24,12 @@ last_invocation = {}  # {user_id: timestamp}
 
 # Emoji mappings
 CATEGORY_EMOJI = {
-    "seeds": "🌱", "gear": "🧰", "egg": "🥚", "cosmetic": "💄", "weather": "☁️",
-    "eventshop_stock": "🎉"
+    "seed_stock": "🌱",
+    "gear_stock": "🧰",
+    "egg_stock": "🥚",
+    "eventshop_stock": "🧘‍♂️",
 }
+
 ITEM_EMOJI = {
     # Seeds
     "carrot": "🥕", "strawberry": "🍓", "blueberry": "🫐", "orange_tulip": "🌷", "tomato": "🍅", "corn": "🌽",
@@ -37,20 +40,16 @@ ITEM_EMOJI = {
     # Gear
     "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
     "basic_sprinkler": "🌦️", "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
-    "magnifying_glass": "🔍", "tanning_mirror": "🪞", "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝",
+    "magnifying_glass": "🔍", "tanning_mirror": "🪞", "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝", "levelup_lollipop": "🍭",
     # Eggs
     "common_egg": "🥚", "mythical_egg": "🐣", "bug_egg": "🐣", "common_summer_egg": "🥚", "rare_summer_egg": "🥚", "paradise_egg": "🐣", "bee_egg": "🐣",
     # Cosmetics
     "sign_crate": "📦", "medium_wood_flooring": "🪵", "market_cart": "🛒",
     "yellow_umbrella": "☂️", "hay_bale": "🌾", "brick_stack": "🧱",
-    "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️", "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦", "blue_cooler_chest": "🧊", "large_wood_flooring": "🪚", "medium_stone_table": "🪨", "wood_pile": "🪵", "medium_path_tile": "🛤️", "shovel_grave": "⛏️", "frog_fountain": "🐸", "small_stone_lantern": "🕯️", "small_wood_table": "🪑", "medium_circle_tile": "🔘", "small_path_tile": "🔹", "mini_tv": "📺", "rock_pile": "🗿", "brown_stone_pillar": "🧱", "red_cooler_chest": "🧊", "bookshelf": "📚", "brown_bench": "🪑", "log_bench": "🪵",
-    # Added missing items
-    "large_path_tile": "◼️",  # Large Path Tile
-    "axe_stump": "🪵",          # Axe Stump
-    "shovel": "⛏️",             # Shovel
+    "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️", "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦", "blue_cooler_chest": "🧊", "large_wood_flooring": "🪚", "medium_stone_table": "🪨", "wood_pile": "🪵", "medium_path_tile": "🛤️", "shovel_grave": "⛏️", "frog_fountain": "🐸", "small_stone_lantern": "🕯️", "small_wood_table": "🪑", "medium_circle_tile": "🔘", "small_path_tile": "🔹", "mini_tv": "📺", "rock_pile": "🗿", "brown_stone_pillar": "🧱", "red_cooler_chest": "🧊", "bookshelf": "📚", "brown_bench": "🪑", "log_bench": "🪵", "large_path_tile": "◼️", "axe_stump": "🪵", "shovel": "⛏️", "flat_canopy": "🏕️", "large_wood_table": "🪵", "small_wood_flooring": "🪵", "small_stone_pad": "◽️", "long_stone_table": "🪨",
     # Event shop items
     "zen_seed_pack": "🌱", "zen_egg": "🥚", "hot_spring": "♨️", "zen_sand": "🏖️", "zenflare": "✨",
-    "zen_crate": "📦", "soft_sunshine": "☀️", "koi": "🐟", "zen_gnome_crate": "🧙", "spiked_mango": "🥭", "pet_shard_tranquil": "💠"
+    "zen_crate": "📦", "soft_sunshine": "☀️", "koi": "🐟", "zen_gnome_crate": "🧙", "spiked_mango": "🥭", "pet_shard_tranquil": "💠", "tranquil_radar": "🔫",
 }
 WEATHER_EMOJI = {
     "rain": "🌧️", "heatwave": "🔥", "summerharvest": "☀️",
@@ -60,6 +59,13 @@ WEATHER_EMOJI = {
     "bloodmoonevent": "🌕🩸", "meteorshower": "☄️", "spacetravel": "🪐",
     "disco": "💃", "djjhai": "🎵", "blackhole": "🕳️",
     "jandelstorm": "🌩️", "sandstorm": "🏜️"
+}
+
+TITLE_MAP = {
+    "seed_stock": "Seeds",
+    "gear_stock": "Gear",
+    "egg_stock": "Eggs",
+    "eventshop_stock": "Zen-event",
 }
 
 # Fetchers
@@ -74,12 +80,16 @@ def check_cooldown(user_id: int) -> bool:
 
 # Formatters:
 def format_block(key, items):
-     if not items: return ""
-     emoji, title = CATEGORY_EMOJI.get(key,"•"), key.replace("_stock","" ).capitalize()
-     lines = [f"━ {emoji} *{title}* ━"]
-     for it in items:
-         em = ITEM_EMOJI.get(it.get("item_id"),"•"); lines.append(f"   {em} {it.get("display_name")} x{it.get("quantity",0)}")
-     return "\n".join(lines)+"\n\n"
+    if not items:
+        return ""
+    emoji = CATEGORY_EMOJI.get(key, "•")
+    title = TITLE_MAP.get(key, key.replace("_stock", "").capitalize())
+    header = f"━ {emoji} {title} ━"
+    lines = [header]
+    for it in items:
+        em = ITEM_EMOJI.get(it.get("item_id"), "•")
+        lines.append(f"   {em} {it.get('display_name')} x{it.get('quantity', 0)}")
+    return "\n".join(lines) + "\n\n"
 
 def format_weather(weather_list):
      active = next((w for w in weather_list if w.get("active")), None)
