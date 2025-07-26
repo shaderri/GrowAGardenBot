@@ -36,7 +36,7 @@ ITEM_EMOJI = {
     "daffodil": "🌼", "watermelon": "🍉", "pumpkin": "🎃", "apple": "🍎", "bamboo": "🎍",
     "coconut": "🥥", "cactus": "🌵", "dragon_fruit": "🐲", "mango": "🥭", "grape": "🍇",
     "mushroom": "🍄", "pepper": "🌶️", "cacao": "🍫", "beanstalk": "🌿", "ember_lily": "🌸",
-    "sugar_apple": "🍏", "burning_bud": "🔥", "giant_pinecone": "🌰",
+    "sugar_apple": "🍏", "burning_bud": "🔥", "giant_pinecone": "🌰", "elder_strawberry": "🍓",
     # Gear
     "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
     "basic_sprinkler": "🌦️", "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
@@ -49,7 +49,7 @@ ITEM_EMOJI = {
     "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️", "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦", "blue_cooler_chest": "🧊", "large_wood_flooring": "🪚", "medium_stone_table": "🪨", "wood_pile": "🪵", "medium_path_tile": "🛤️", "shovel_grave": "⛏️", "frog_fountain": "🐸", "small_stone_lantern": "🕯️", "small_wood_table": "🪑", "medium_circle_tile": "🔘", "small_path_tile": "🔹", "mini_tv": "📺", "rock_pile": "🗿", "brown_stone_pillar": "🧱", "red_cooler_chest": "🧊", "bookshelf": "📚", "brown_bench": "🪑", "log_bench": "🪵", "large_path_tile": "◼️", "axe_stump": "🪵", "shovel": "⛏️", "flat_canopy": "🏕️", "large_wood_table": "🪵", "small_wood_flooring": "🪵", "small_stone_pad": "◽️", "long_stone_table": "🪨",
     # Event shop items
     "zen_seed_pack": "🌱", "zen_egg": "🥚", "hot_spring": "♨️", "zen_sand": "🏖️", "zenflare": "✨",
-    "zen_crate": "📦", "soft_sunshine": "☀️", "koi": "🐟", "zen_gnome_crate": "🧙", "spiked_mango": "🥭", "pet_shard_tranquil": "💠", "tranquil_radar": "🔫",
+    "zen_crate": "📦", "soft_sunshine": "☀️", "koi": "🐟", "zen_gnome_crate": "🧙", "spiked_mango": "🥭", "pet_shard_tranquil": "💠", "tranquil_radar": "🔫", "sakura_bush": "🌸", "corrupt_radar": "🧿", "raiju": "⚡", "pet_shard_corrupted": "🧩",
 }
 WEATHER_EMOJI = {
     "rain": "🌧️", "heatwave": "🔥", "summerharvest": "☀️",
