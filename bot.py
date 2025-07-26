@@ -95,7 +95,7 @@ PRICE_MAP = {
 }
 
 # APIs
-STOCK_API = "https://growagardenstock.com/api/stock?type=gear-seeds&ts=1753536392219"
+STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
 WEATHER_API = "https://api.joshlei.com/v2/growagarden/weather"
 
 # Fetchers
