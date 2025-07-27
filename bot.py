@@ -243,8 +243,9 @@ async def monitor_stock(app):
                     # Получаем и форматируем цену
                     price = PRICE_MAP.get(iid)
                     price_str = f"{price:,}¢" if price is not None else "—"
+                    russian_name = ITEM_NAME_RU.get(iid, it.get("display_name"))
                     msg = (
-                        f"*{ITEM_EMOJI[iid]} {it.get('display_name')}: x{qty} в стоке!*\n"
+                       f"*{ITEM_EMOJI[iid]} {russian_name}: x{qty} в стоке!*\n"
                         f"💰 Цена — {price_str}\n"
                         f"🕒 {ts}\n"
                         f"\n*@GroowAGarden*")
