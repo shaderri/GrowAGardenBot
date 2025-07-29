@@ -146,7 +146,7 @@ def format_weather_block(weather_list: list) -> str:
     eid = active.get("weather_id")
     emoji = WEATHER_EMOJI.get(eid, "☁️")
     end_ts = active.get("end_duration_unix", 0)
-    ends = datetime.fromtimestamp(end_ts, tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M MSK") if end_ts else "--"
+    ends = datetime.fromtimestamp(end_ts, tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK") if end_ts else "--"
     dur = active.get("duration", 0)
     return (f"━ {emoji} *Погода* ━\n"
             f"*Текущая:* {name}\n"
@@ -211,6 +211,20 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await tgt.reply_markdown(format_weather_block(weather))
 
 # Scheduling helpers
+def compute_delay():
+    now = datetime.now(tz=ZoneInfo("Europe/Moscow"))
+    minute = now.minute
+    next_min = ((minute // 5) + 1) * 5
+    hour = now.hour
+    if next_min >= 60:
+        next_min = 0
+        hour = (hour + 1) % 24
+    next_run = now.replace(hour=hour, minute=next_min, second=7, microsecond=0)
+    delta = (next_run - now).total_seconds()
+    if delta < 0:
+        delta += 24*3600
+    return delta
+
 
 def compute_egg_delay():
     now = datetime.now(tz=ZoneInfo("Europe/Moscow"))
@@ -230,7 +244,7 @@ def compute_egg_delay():
 # Notification Tasks
 async def monitor_stock(app):
     while True:
-        delay = compute_delay()
+        delay = compute_egg_delay()
         logging.info(f"Sleeping {delay:.1f}s until next stock check...")
         await asyncio.sleep(delay)
         data = fetch_all_stock()
