@@ -18,21 +18,12 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     ContextTypes
 )
-from flask import Flask
-import threading
 
 # Load environment variables
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 PORT = int(os.getenv("PORT", 10000))
-
-# Flask app to keep bot alive
-flask_app = Flask(__name__)
-
-@flask_app.route('/')
-def home():
-    return 'Bot is running', 200
 
 # Emoji mappings
 CATEGORY_EMOJI = {
@@ -287,13 +278,6 @@ async def monitor_egg(app):
 async def post_init(app):
     app.create_task(monitor_stock(app))
     app.create_task(monitor_egg(app))
-
-# Start Flask server
-def run_flask():
-    flask_app.run(host="0.0.0.0", port=PORT)
-
-flask_thread = threading.Thread(target=run_flask)
-flask_thread.start()
 
 app = (
     ApplicationBuilder()
