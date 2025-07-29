@@ -25,7 +25,7 @@ import threading
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
-PORT = int(os.getenv("PORT", 5000))
+PORT = int(os.getenv("PORT", 10000))
 
 # Flask app to keep bot alive
 flask_app = Flask(__name__)
