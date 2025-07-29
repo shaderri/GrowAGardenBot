@@ -1,4 +1,3 @@
-# bot.py
 import types, sys
 # Monkey-patch imghdr stub for Python 3.13 compatibility
 if 'imghdr' not in sys.modules:
@@ -9,6 +8,7 @@ if 'imghdr' not in sys.modules:
 import os
 import asyncio
 import logging
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 import requests
@@ -20,12 +20,12 @@ from telegram.ext import (
 )
 from flask import Flask
 import threading
-import time
 
 # Load environment variables
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
+PORT = int(os.getenv("PORT", 5000))
 
 # Flask app to keep bot alive
 flask_app = Flask(__name__)
@@ -38,6 +38,7 @@ def home():
 CATEGORY_EMOJI = {
     "seeds": "🌱", "gear": "🧰", "egg": "🥚", "cosmetic": "💄", "weather": "☁️"
 }
+
 ITEM_EMOJI = {
     # ... (остальные эмодзи) ...
     "grape": "🍇",
@@ -52,10 +53,14 @@ ITEM_EMOJI = {
     "master_sprinkler": "🌧️",
     "levelup_lollipop": "🍭",
     "elder_strawberry": "🍓",
+    "paradise_egg": "🐣",
+    "bug_egg": "🐣",
 }
 
 # Переводы отслеживаемых предметов на русский
 ITEM_NAME_RU = {
+    "paradise_egg": "Райское яйцо",
+    "bug_egg": "Яйцо Жука",
     "grape": "Виноград",
     "mushroom": "Грибы",
     "pepper": "Перец",
@@ -80,6 +85,8 @@ NOTIFY_ITEMS = [
 
 # Prices for notifications (in ¢)
 PRICE_MAP = {
+    "paradise_egg": 50_000_000,
+    "bug_egg": 50_000_000,
     "grape": 850_000,
     "mushroom": 150_000,
     "pepper": 1_000_000,
@@ -156,7 +163,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Выбери действие:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Cooldown 10 sec for stock button
     last = context.user_data.get("last_stock", 0)
     if time.time() - last < 10:
         await update.callback_query.answer("⏳ Подожди немного прежде чем снова нажать", show_alert=True)
@@ -168,7 +174,7 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         tgt = update.message
     data = fetch_all_stock()
-    now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S MSK")
+    now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
     text = f"*🕒 {now}*\n\n"
     for sec in ["seed_stock","gear_stock","egg_stock"]:
         text += format_block(sec, data.get(sec, []))
@@ -186,7 +192,7 @@ async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         tgt = update.message
     data = fetch_all_stock()
-    now = datetime.now(tz=ZoneInfo("Europe/Mосква")).strftime("%d.%m.%Y %H:%M:%S MSK")
+    now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
     text = f"*🕒 {now}*\n\n" + format_block("cosmetic_stock", data.get("cosmetic_stock", []))
     await tgt.reply_markdown(text)
 
@@ -204,65 +210,76 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     weather = fetch_weather()
     await tgt.reply_markdown(format_weather_block(weather))
 
-# Command wrappers
-async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await handle_stock(update, context)
+# Scheduling helpers
 
-async def cosmetic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await handle_cosmetic(update, context)
-
-async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await handle_weather(update, context)
-
-# Notification Task
-def compute_delay():
+def compute_egg_delay():
     now = datetime.now(tz=ZoneInfo("Europe/Moscow"))
     minute = now.minute
-    next_min = ((minute // 5) + 1) * 5
-    hour = now.hour
-    if next_min >= 60:
+    if minute < 30:
+        next_min = 30
+        hour = now.hour
+    else:
         next_min = 0
-        hour = (hour + 1) % 24
+        hour = (now.hour + 1) % 24
     next_run = now.replace(hour=hour, minute=next_min, second=7, microsecond=0)
     delta = (next_run - now).total_seconds()
     if delta < 0:
-        delta += 24*3600
+        delta += 24 * 3600
     return delta
 
+# Notification Tasks
 async def monitor_stock(app):
     while True:
         delay = compute_delay()
-        logging.info(f"Sleeping {delay:.1f}s until next check...")
+        logging.info(f"Sleeping {delay:.1f}s until next stock check...")
         await asyncio.sleep(delay)
         data = fetch_all_stock()
-        ts = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%d.%m.%Y %H:%M:%S MSK")
-        for section in ["seed_stock","gear_stock","egg_stock","cosmetic_stock"]:
+        now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
+        for section in ["seed_stock", "gear_stock", "cosmetic_stock"]:
             for it in data.get(section, []):
                 iid, qty = it.get("item_id"), it.get("quantity",0)
                 if iid in NOTIFY_ITEMS and qty > 0:
-                    # Получаем и форматируем цену
-                    price = PRICE_MAP.get(iid)
-                    price_str = f"{price:,}¢" if price is not None else "—"
-                    russian_name = ITEM_NAME_RU.get(iid, it.get("display_name"))
+                    price_str = f"{PRICE_MAP.get(iid):,}¢"
+                    name_ru = ITEM_NAME_RU.get(iid, it.get("display_name"))
                     msg = (
-                       f"*{ITEM_EMOJI[iid]} {russian_name}: x{qty} в стоке!*\n"
+                        f"*{ITEM_EMOJI[iid]} {name_ru}: x{qty} в стоке!*\n"
                         f"💰 Цена — {price_str}\n"
-                        f"🕒 {ts}\n"
-                        f"\n*@GroowAGarden*")
-                    logging.info(f"Notify {iid} x{qty}")
+                        f"🕒 {now}\n"
+                        f"\n*@GroowAGarden*"
+                    )
                     await app.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
+
+async def monitor_egg(app):
+    while True:
+        delay = compute_egg_delay()
+        logging.info(f"Sleeping {delay:.1f}s until next egg check...")
+        await asyncio.sleep(delay)
+        data = fetch_all_stock()
+        now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
+        for it in data.get("egg_stock", []):
+            iid, qty = it.get("item_id"), it.get("quantity",0)
+            if iid in ["paradise_egg", "bug_egg"] and qty > 0:
+                price_str = f"{PRICE_MAP.get(iid):,}¢"
+                name_ru = ITEM_NAME_RU.get(iid, it.get("display_name"))
+                msg = (
+                    f"*{ITEM_EMOJI[iid]} {name_ru}: x{qty} в стоке!*\n"
+                    f"💰 Цена — {price_str}\n"
+                    f"🕒 {now}\n"
+                    f"\n*@GroowAGarden*"
+                )
+                await app.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
 
 # Application setup
 async def post_init(app):
     app.create_task(monitor_stock(app))
+    app.create_task(monitor_egg(app))
 
-    # Start Flask in separate thread
+# Start Flask server
 def run_flask():
     flask_app.run(host="0.0.0.0", port=PORT)
 
 flask_thread = threading.Thread(target=run_flask)
 flask_thread.start()
-
 
 app = (
     ApplicationBuilder()
@@ -272,9 +289,9 @@ app = (
 )
 # Register handlers
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("stock", stock_command))
-app.add_handler(CommandHandler("cosmetic", cosmetic_command))
-app.add_handler(CommandHandler("weather", weather_command))
+app.add_handler(CommandHandler("stock", handle_stock))
+app.add_handler(CommandHandler("cosmetic", handle_cosmetic))
+app.add_handler(CommandHandler("weather", handle_weather))
 app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
 app.add_handler(CallbackQueryHandler(handle_cosmetic, pattern="show_cosmetic"))
 app.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
@@ -282,7 +299,6 @@ app.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
 if __name__ == "__main__":
     app.run_webhook(
         listen="0.0.0.0",
-        port=int(os.getenv("PORT",5000)),
+        port=PORT,
         webhook_url=f"https://{os.getenv('DOMAIN')}/webhook/{BOT_TOKEN}"
     )
-    print("Listening on port", os.getenv("PORT"))
