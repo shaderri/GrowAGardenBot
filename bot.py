@@ -202,7 +202,7 @@ def compute_delay():
     next_min = ((now.minute // 5) + 1) * 5
     hour = now.hour + (next_min // 60)
     minute = next_min % 60
-    run = now.replace(hour=hour%24, minute=minute, second=7, microsecond=0)
+    run = now.replace(hour=hour%24, minute=minute, second=2, microsecond=0)
     delta = (run - now).total_seconds()
     return delta if delta>0 else delta + 86400
 
@@ -212,7 +212,7 @@ def compute_egg_delay():
         minute, hour = 30, now.hour
     else:
         minute, hour = 0, (now.hour+1)%24
-    run = now.replace(hour=hour, minute=minute, second=7, microsecond=0)
+    run = now.replace(hour=hour, minute=minute, second=2, microsecond=0)
     delta = (run - now).total_seconds()
     return delta if delta>0 else delta + 86400
 
