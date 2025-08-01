@@ -113,7 +113,7 @@ def fetch_all_stock():
     try:
         r = requests.get(
             STOCK_API,
-            params={"jstudio_key": JSTUDIO_KEY},
+            headers={"jstudio-key": JSTUDIO_KEY},
             timeout=10
         )
         r.raise_for_status()
@@ -122,11 +122,12 @@ def fetch_all_stock():
         logging.error(f"Stock fetch error: {e}")
         return {}
 
+
 def fetch_weather():
     try:
         r = requests.get(
             WEATHER_API,
-            params={"jstudio_key": JSTUDIO_KEY},
+            headers={"jstudio-key": JSTUDIO_KEY},
             timeout=10
         )
         r.raise_for_status()
@@ -270,10 +271,7 @@ async def post_init(app):
     app.create_task(monitor_stock(app))
     app.create_task(monitor_egg(app))
 
-app = ApplicationBuilder() \
-      .token(BOT_TOKEN) \
-      .post_init(post_init) \
-      .build()
+app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("stock", handle_stock))
 app.add_handler(CommandHandler("cosmetic", handle_cosmetic))
@@ -283,9 +281,7 @@ app.add_handler(CallbackQueryHandler(handle_cosmetic, pattern="show_cosmetic"))
 app.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
 
 if __name__ == "__main__":
-    # Start Flask keepalive server
     t = threading.Thread(target=run_flask)
     t.daemon = True
     t.start()
-    # Start Telegram bot polling
     app.run_polling()
