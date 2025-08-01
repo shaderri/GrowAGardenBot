@@ -26,6 +26,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 KEEPALIVE_PORT = int(os.getenv("PORT", 10000))
+JSTUDIO_KEY = os.getenv("JSTUDIO_KEY")
 
 # Flask app to keep bot alive
 flask_app = Flask(__name__)
@@ -110,7 +111,11 @@ WEATHER_API = "https://api.joshlei.com/v2/growagarden/weather"
 # Fetchers
 def fetch_all_stock():
     try:
-        r = requests.get(STOCK_API, timeout=10)
+        r = requests.get(
+            STOCK_API,
+            params={"jstudio_key": JSTUDIO_KEY},
+            timeout=10
+        )
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -119,7 +124,11 @@ def fetch_all_stock():
 
 def fetch_weather():
     try:
-        r = requests.get(WEATHER_API, timeout=10)
+        r = requests.get(
+            WEATHER_API,
+            params={"jstudio_key": JSTUDIO_KEY},
+            timeout=10
+        )
         r.raise_for_status()
         return r.json().get("weather", [])
     except Exception as e:
@@ -142,17 +151,24 @@ def format_weather_block(weather_list: list) -> str:
     active = next((w for w in weather_list if w.get("active")), None)
     if not active:
         return "━ ☁️ *Погода* ━\nНет активных погодных событий"
-    emoji = CATEGORY_EMOJI.get("weather", "☁️")
+    emoji = CATEGORY_EMOJI["weather"]
     end_ts = active.get("end_duration_unix", 0)
-    ends = datetime.fromtimestamp(end_ts, tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK") if end_ts else "--"
-    return f"━ {emoji} *Погода* ━\n*Текущая:* {active.get('weather_name')}\n*Заканчивается в:* {ends}\n*Длительность:* {active.get('duration',0)} сек"
+    ends = datetime.fromtimestamp(end_ts, tz=ZoneInfo("Europe/Moscow")) \
+           .strftime("%H:%M:%S MSK") if end_ts else "--"
+    return (f"━ {emoji} *Погода* ━\n"
+            f"*Текущая:* {active.get('weather_name')}\n"
+            f"*Заканчивается в:* {ends}\n"
+            f"*Длительность:* {active.get('duration',0)} сек")
 
 # Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb = [[InlineKeyboardButton("📦 Стоки", callback_data="show_stock")],
-          [InlineKeyboardButton("💄 Косметика", callback_data="show_cosmetic")],
-          [InlineKeyboardButton("☁️ Погода", callback_data="show_weather")]]
-    await update.message.reply_text("Привет! Выбери действие:", reply_markup=InlineKeyboardMarkup(kb))
+    kb = [
+        [InlineKeyboardButton("📦 Стоки", callback_data="show_stock")],
+        [InlineKeyboardButton("💄 Косметика", callback_data="show_cosmetic")],
+        [InlineKeyboardButton("☁️ Погода", callback_data="show_weather")]
+    ]
+    await update.message.reply_text("Привет! Выбери действие:", 
+                                    reply_markup=InlineKeyboardMarkup(kb))
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     last = context.user_data.get("last_stock", 0)
@@ -181,7 +197,8 @@ async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.answer()
     data = fetch_all_stock()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
-    text = f"*🕒 {now}*\n\n" + format_block("cosmetic_stock", data.get("cosmetic_stock", []))
+    text = f"*🕒 {now}*\n\n" + format_block("cosmetic_stock", 
+                                           data.get("cosmetic_stock", []))
     await tgt.reply_markdown(text)
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -221,7 +238,8 @@ async def monitor_stock(app):
     while True:
         await asyncio.sleep(compute_delay())
         data = fetch_all_stock()
-        now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
+        now = datetime.now(tz=ZoneInfo("Europe/Moscow")) \
+              .strftime("%H:%M:%S MSK")
         for sec in ["seed_stock","gear_stock","cosmetic_stock"]:
             for it in data.get(sec, []):
                 iid, qty = it.get("item_id"), it.get("quantity",0)
@@ -229,27 +247,33 @@ async def monitor_stock(app):
                     msg = (f"*{ITEM_EMOJI[iid]} {ITEM_NAME_RU.get(iid,it['display_name'])}: x{qty} в стоке!*\n"
                            f"💰 Цена — {PRICE_MAP[iid]:,}¢\n"
                            f"🕒 {now}\n\n*@GroowAGarden*")
-                    await app.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
+                    await app.bot.send_message(chat_id=CHANNEL_ID, 
+                                               text=msg, parse_mode="Markdown")
 
 async def monitor_egg(app):
     while True:
         await asyncio.sleep(compute_egg_delay())
         data = fetch_all_stock()
-        now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
+        now = datetime.now(tz=ZoneInfo("Europe/Moscow")) \
+              .strftime("%H:%M:%S MSK")
         for it in data.get("egg_stock", []):
             iid, qty = it.get("item_id"), it.get("quantity",0)
             if iid in ["paradise_egg","bug_egg"] and qty>0:
                 msg = (f"*{ITEM_EMOJI[iid]} {ITEM_NAME_RU.get(iid,it['display_name'])}: x{qty} в стоке!*\n"
                        f"💰 Цена — {PRICE_MAP[iid]:,}¢\n"
                        f"🕒 {now}\n\n*@GroowAGarden*")
-                await app.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
+                await app.bot.send_message(chat_id=CHANNEL_ID, 
+                                           text=msg, parse_mode="Markdown")
 
 # Application setup
 async def post_init(app):
     app.create_task(monitor_stock(app))
     app.create_task(monitor_egg(app))
 
-app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
+app = ApplicationBuilder() \
+      .token(BOT_TOKEN) \
+      .post_init(post_init) \
+      .build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("stock", handle_stock))
 app.add_handler(CommandHandler("cosmetic", handle_cosmetic))
