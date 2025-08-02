@@ -54,6 +54,7 @@ ITEM_EMOJI = {
     "burning_bud": "🔥",
     "giant_pinecone": "🌰",
     "master_sprinkler": "🌧️",
+    "grandmaster_sprinkler": "💦",
     "levelup_lollipop": "🍭",
     "elder_strawberry": "🍓",
     "paradise_egg": "🐣",
@@ -74,6 +75,7 @@ ITEM_NAME_RU = {
     "burning_bud": "Горящий бутон",
     "giant_pinecone": "Гигантская шишка",
     "master_sprinkler": "Мастер спринклер",
+    "grandmaster_sprinkler": "Грандмастер спринклер",
     "levelup_lollipop": "Леденец уровня",
     "elder_strawberry": "Бузинная клубника"
 }
@@ -83,7 +85,7 @@ NOTIFY_ITEMS = [
     "grape", "mushroom", "pepper", "cacao",
     "beanstalk", "ember_lily", "sugar_apple",
     "burning_bud", "giant_pinecone",
-    "master_sprinkler", "levelup_lollipop", "elder_strawberry"
+    "master_sprinkler", "grandmaster_sprinkler", "levelup_lollipop", "elder_strawberry"
 ]
 
 # Prices for notifications (in ¢)
@@ -100,6 +102,7 @@ PRICE_MAP = {
     "burning_bud": 40_000_000,
     "giant_pinecone": 55_000_000,
     "master_sprinkler": 10_000_000,
+    "grandmaster_sprinkler": 50_000_000,
     "levelup_lollipop": 10_000_000_000,
     "elder_strawberry": 70_000_000
 }
