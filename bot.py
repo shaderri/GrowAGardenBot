@@ -102,7 +102,7 @@ PRICE_MAP = {
     "burning_bud": 40_000_000,
     "giant_pinecone": 55_000_000,
     "master_sprinkler": 10_000_000,
-    "grandmaster_sprinkler": 50_000_000,
+    "grandmaster_sprinkler": 1_000_000_000,
     "levelup_lollipop": 10_000_000_000,
     "elder_strawberry": 70_000_000
 }
