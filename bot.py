@@ -28,7 +28,7 @@ CATEGORY_EMOJI = {
     "seed_stock": "🌱",
     "gear_stock": "🧰",
     "egg_stock": "🥚",
-    "eventshop_stock": "🧘‍♂️",
+    # "eventshop_stock": "🧘‍♂️",
 }
 
 ITEM_EMOJI = {
@@ -41,7 +41,7 @@ ITEM_EMOJI = {
     # Gear
     "cleaning_spray": "🧴", "trowel": "⛏️", "watering_can": "🚿", "recall_wrench": "🔧",
     "basic_sprinkler": "🌦️", "advanced_sprinkler": "💦", "godly_sprinkler": "⚡", "master_sprinkler": "🌧️",
-    "magnifying_glass": "🔍", "tanning_mirror": "🪞", "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝", "levelup_lollipop": "🍭",
+    "magnifying_glass": "🔍", "tanning_mirror": "🪞", "favorite_tool": "❤️", "harvest_tool": "🧲", "friendship_pot": "🤝", "levelup_lollipop": "🍭", "trading_ticket": "🎟️", "grandmaster_sprinkler": "💦",
     # Eggs
     "common_egg": "🥚", "mythical_egg": "🐣", "bug_egg": "🐣", "common_summer_egg": "🥚", "rare_summer_egg": "🥚", "paradise_egg": "🐣", "bee_egg": "🐣",
     # Cosmetics
@@ -67,7 +67,7 @@ TITLE_MAP = {
     "seed_stock": "*Seeds*",
     "gear_stock": "*Gear*",
     "egg_stock": "*Eggs*",
-    "eventshop_stock": "*Zen-event*",
+    # "eventshop_stock": "*Zen-event*",
 }
 
 # Fetchers (с ключом в заголовке)
@@ -152,7 +152,7 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
     text = f"*🕒 {now}*\n\n" + "".join(
         format_block(sec, data.get(sec, []))
-        for sec in ["seed_stock", "gear_stock", "egg_stock", "eventshop_stock"]
+        for sec in ["seed_stock", "gear_stock", "egg_stock"] # , "eventshop_stock"
     )
     await tgt.reply_markdown(text)
 
