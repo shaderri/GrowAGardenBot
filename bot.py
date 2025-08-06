@@ -16,6 +16,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
 )
+import threading
 
 # ==== Настройка логирования ====
 logging.basicConfig(
