@@ -198,7 +198,7 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE):
                 msg = (
                     f"*{emoji} {name_ru}: x{qty} в стоке!*\n"
                     f"💰 Цена — {price:,}¢\n"
-                    f"🕒 {now}\n\n*@GrowAGarden*"
+                    f"🕒 {now}\n\n*@GroowAGarden*"
                 )
                 await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
             last_qty[iid] = qty
