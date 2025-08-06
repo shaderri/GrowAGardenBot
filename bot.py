@@ -16,59 +16,54 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
 )
-import threading
 
-# ==== Настройка логирования ====
+# ====== Логирование ======
 logging.basicConfig(
     format="%(asctime)s %(levelname)s:%(name)s: %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-# ==== Monkey-patch imghdr для Python 3.13 ====
+# ====== Monkey-patch imghdr для Python 3.13 ======
 if "imghdr" not in sys.modules:
     mod = types.ModuleType("imghdr")
     mod.what = lambda *args, **kwargs: None
     sys.modules["imghdr"] = mod
 
-# ==== Подгружаем переменные окружения ====
+# ====== Переменные окружения ======
 load_dotenv()
 BOT_TOKEN      = os.getenv("BOT_TOKEN")
 CHANNEL_ID     = os.getenv("CHANNEL_ID")
 KEEPALIVE_PORT = int(os.getenv("PORT", 10000))
 JSTUDIO_KEY    = os.getenv("JSTUDIO_KEY")
 
-# ==== URL API ====
+# ====== Эндпоинты API ======
 STOCK_API   = "https://api.joshlei.com/v2/growagarden/stock"
 WEATHER_API = "https://api.joshlei.com/v2/growagarden/weather"
 
-# ==== Эмодзи и переводы ====
+# ====== Эмодзи, переводы, цена ======
 CATEGORY_EMOJI = {
-    "seed_stock": "🌱",
-    "gear_stock": "🧰",
-    "egg_stock": "🥚",
-    "cosmetic_stock": "💄",
-    "weather": "☁️",
+    "seed_stock":      "🌱",
+    "gear_stock":      "🧰",
+    "egg_stock":       "🥚",
+    "cosmetic_stock":  "💄",
 }
 ITEM_EMOJI = {
-    "grape": "🍇",       "mushroom": "🍄",  "pepper": "🌶️",
-    "cacao": "🍫",       "beanstalk": "🫛","ember_lily": "🌸",
-    "sugar_apple": "🍏", "burning_bud": "🔥","giant_pinecone": "🌰",
-    "master_sprinkler": "🌧️","grandmaster_sprinkler": "💦",
-    "levelup_lollipop": "🍭","elder_strawberry": "🍓",
-    "paradise_egg": "🐣", "bug_egg": "🐣",
+    "grape":"🍇","mushroom":"🍄","pepper":"🌶️",
+    "cacao":"🍫","beanstalk":"🫛","ember_lily":"🌸",
+    "sugar_apple":"🍏","burning_bud":"🔥",
+    "giant_pinecone":"🌰","master_sprinkler":"🌧️",
+    "grandmaster_sprinkler":"💦","levelup_lollipop":"🍭",
+    "elder_strawberry":"🍓","paradise_egg":"🐣","bug_egg":"🐣",
 }
 ITEM_NAME_RU = {
-    "paradise_egg": "Райское яйцо", "bug_egg": "Яйцо жука",
-    "grape": "Виноград",           "mushroom": "Грибы",
-    "pepper": "Перец",             "cacao": "Какао",
-    "beanstalk": "Бобовый стебель","ember_lily": "Эмбер лили",
-    "sugar_apple": "Сахарное яблоко","burning_bud": "Горящий бутон",
-    "giant_pinecone": "Гигантская шишка",
-    "master_sprinkler": "Мастер спринклер",
-    "grandmaster_sprinkler": "Грандмастер спринклер",
-    "levelup_lollipop": "Леденец уровня",
-    "elder_strawberry": "Бузинная клубника",
+    "paradise_egg":"Райское яйцо","bug_egg":"Яйцо жука",
+    "grape":"Виноград","mushroom":"Грибы","pepper":"Перец",
+    "cacao":"Какао","beanstalk":"Бобовый стебель","ember_lily":"Эмбер лили",
+    "sugar_apple":"Сахарное яблоко","burning_bud":"Горящий бутон",
+    "giant_pinecone":"Гигантская шишка","master_sprinkler":"Мастер-спринклер",
+    "grandmaster_sprinkler":"Грандмастер-спринклер",
+    "levelup_lollipop":"Леденец уровня","elder_strawberry":"Бузинная клубника",
 }
 NOTIFY_ITEMS = [
     "grape","mushroom","pepper","cacao","beanstalk","ember_lily",
@@ -78,18 +73,16 @@ NOTIFY_ITEMS = [
     "paradise_egg","bug_egg"
 ]
 PRICE_MAP = {
-    "paradise_egg": 50_000_000, "bug_egg": 50_000_000,
-    "grape": 850_000, "mushroom": 150_000,
-    "pepper": 1_000_000, "cacao": 2_500_000,
-    "beanstalk": 10_000_000, "ember_lily": 15_000_000,
-    "sugar_apple": 25_000_000, "burning_bud": 40_000_000,
-    "giant_pinecone": 55_000_000,"master_sprinkler": 10_000_000,
-    "grandmaster_sprinkler": 1_000_000_000,
-    "levelup_lollipop": 10_000_000_000,
-    "elder_strawberry": 70_000_000,
+    "paradise_egg":50_000_000,"bug_egg":50_000_000,
+    "grape":850_000,"mushroom":150_000,"pepper":1_000_000,
+    "cacao":2_500_000,"beanstalk":10_000_000,
+    "ember_lily":15_000_000,"sugar_apple":25_000_000,
+    "burning_bud":40_000_000,"giant_pinecone":55_000_000,
+    "master_sprinkler":10_000_000,"grandmaster_sprinkler":1_000_000_000,
+    "levelup_lollipop":10_000_000_000,"elder_strawberry":70_000_000
 }
 
-# ==== Flask для keep-alive ====
+# ====== Flask для keep-alive ======
 flask_app = Flask(__name__)
 @flask_app.route("/")
 def home():
@@ -98,14 +91,13 @@ def home():
 def run_flask():
     flask_app.run(host="0.0.0.0", port=KEEPALIVE_PORT)
 
-# ==== Вспомогательные фичи ====
+# ====== Функции запроса ======
 def fetch_all_stock():
-    """Запрашивает весь сток, возвращает dict или пустой."""
     try:
         r = requests.get(
             STOCK_API,
             headers={"jstudio-key": JSTUDIO_KEY},
-            timeout=10,
+            timeout=10
         )
         r.raise_for_status()
         return r.json()
@@ -114,12 +106,11 @@ def fetch_all_stock():
         return {}
 
 def fetch_weather():
-    """Запрашивает погоду."""
     try:
         r = requests.get(
             WEATHER_API,
             headers={"jstudio-key": JSTUDIO_KEY},
-            timeout=10,
+            timeout=10
         )
         r.raise_for_status()
         return r.json().get("weather", [])
@@ -127,11 +118,11 @@ def fetch_weather():
         logger.error(f"Weather fetch error: {e}")
         return []
 
+# ====== Форматирование вывода ======
 def format_block(key: str, items: list) -> str:
-    if not items:
-        return ""
+    if not items: return ""
     emoji = CATEGORY_EMOJI.get(key, "•")
-    title = key.replace("_stock", "").capitalize()
+    title = key.replace("_stock","").capitalize()
     lines = [f"━ {emoji} *{title}* ━"]
     for it in items:
         em = ITEM_EMOJI.get(it["item_id"], "•")
@@ -142,11 +133,8 @@ def format_weather_block(weather_list: list) -> str:
     active = next((w for w in weather_list if w.get("active")), None)
     if not active:
         return "━ ☁️ *Погода* ━\nНет активных погодных событий"
-    end_ts = active.get("end_duration_unix", 0)
-    ends = (
-        datetime.fromtimestamp(end_ts, tz=ZoneInfo("Europe/Moscow"))
-        .strftime("%H:%M:%S MSK") if end_ts else "--"
-    )
+    end_ts = active.get("end_duration_unix",0)
+    ends = datetime.fromtimestamp(end_ts, tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK") if end_ts else "--"
     return (
         f"━ ☁️ *Погода* ━\n"
         f"*Текущая:* {active.get('weather_name')}\n"
@@ -154,7 +142,7 @@ def format_weather_block(weather_list: list) -> str:
         f"*Длительность:* {active.get('duration',0)} сек"
     )
 
-# ==== Обработчики команд ====
+# ====== Обработчики команд ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [
         [InlineKeyboardButton("📦 Стоки",    callback_data="show_stock")],
@@ -162,8 +150,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("☁️ Погода",     callback_data="show_weather")],
     ]
     await update.message.reply_text(
-        "Привет! Выбери действие:",
-        reply_markup=InlineKeyboardMarkup(kb),
+        "Привет! Выбери действие:", reply_markup=InlineKeyboardMarkup(kb)
     )
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -196,10 +183,9 @@ async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tgt = update.callback_query.message
     else:
         tgt = update.message
-    weather = fetch_weather()
-    await tgt.reply_markdown(format_weather_block(weather))
+    await tgt.reply_markdown(format_weather_block(fetch_weather()))
 
-# ==== Задача мониторинга стока ====
+# ====== Мониторинг стока ======
 last_qty = {}
 
 async def monitor_stock_changes(app):
@@ -228,14 +214,10 @@ async def monitor_stock_changes(app):
                     last_qty[iid] = qty
         await asyncio.sleep(10)
 
-async def post_init(app):
-    app.create_task(monitor_stock_changes(app))
-
-# ==== Инициализация приложения ====
+# ====== Инициализация бота ======
 app = (
     ApplicationBuilder()
     .token(BOT_TOKEN)
-    .post_init(post_init)
     .build()
 )
 app.add_handler(CommandHandler("start",    start))
@@ -247,8 +229,10 @@ app.add_handler(CallbackQueryHandler(handle_cosmetic, pattern="show_cosmetic"))
 app.add_handler(CallbackQueryHandler(handle_weather,  pattern="show_weather"))
 
 if __name__ == "__main__":
+    # Запускаем таск мониторинга после старта приложения
+    app.create_task(monitor_stock_changes(app))
     # Запуск Flask для keep-alive
     t = threading.Thread(target=run_flask, daemon=True)
     t.start()
-    # Старт бота
+    # Только polling, без webhook!
     app.run_polling()
