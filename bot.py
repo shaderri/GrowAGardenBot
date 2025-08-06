@@ -1,15 +1,13 @@
 import types
 import sys
 import os
-import asyncio
 import logging
-import threading
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from dotenv import load_dotenv
 
 import requests
 from flask import Flask
+from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -42,7 +40,7 @@ JSTUDIO_KEY    = os.getenv("JSTUDIO_KEY")
 STOCK_API   = "https://api.joshlei.com/v2/growagarden/stock"
 WEATHER_API = "https://api.joshlei.com/v2/growagarden/weather"
 
-# ====== Эмодзи и переводы ======
+# ====== Эмодзи, переводы, цена ======
 CATEGORY_EMOJI = {
     "seed_stock":     "🌱",
     "gear_stock":     "🧰",
@@ -155,11 +153,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Выбери действие:", reply_markup=InlineKeyboardMarkup(kb))
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tgt = update.callback_query.message if update.callback_query else update.message
     if update.callback_query:
         await update.callback_query.answer()
-        tgt = update.callback_query.message
-    else:
-        tgt = update.message
     data = fetch_all_stock()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
     text = f"*🕒 {now}*\n\n"
@@ -168,59 +164,52 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await tgt.reply_markdown(text)
 
 async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tgt = update.callback_query.message if update.callback_query else update.message
     if update.callback_query:
         await update.callback_query.answer()
-        tgt = update.callback_query.message
-    else:
-        tgt = update.message
     data = fetch_all_stock().get("cosmetic_stock", [])
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
-    text = f"*🕒 {now}*\n\n" + format_block("cosmetic_stock", data)
-    await tgt.reply_markdown(text)
+    await tgt.reply_markdown(f"*🕒 {now}*\n\n" + format_block("cosmetic_stock", data))
 
 async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tgt = update.callback_query.message if update.callback_query else update.message
     if update.callback_query:
         await update.callback_query.answer()
-        tgt = update.callback_query.message
-    else:
-        tgt = update.message
     weather = fetch_weather()
     await tgt.reply_markdown(format_weather_block(weather))
 
-# ====== Задача мониторинга стока ======
+# ====== Мониторинг стока через job_queue ======
 last_qty = {}
 
-async def monitor_stock_changes(app):
-    while True:
-        data = fetch_all_stock()
-        if data:
-            now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
-            for sec in ["seed_stock", "gear_stock", "cosmetic_stock", "egg_stock"]:
-                for it in data.get(sec, []):
-                    iid, qty = it["item_id"], it["quantity"]
-                    prev = last_qty.get(iid, 0)
-                    if qty > prev and iid in NOTIFY_ITEMS:
-                        name_ru = ITEM_NAME_RU.get(iid, it["display_name"])
-                        emoji   = ITEM_EMOJI.get(iid, "")
-                        price   = PRICE_MAP.get(iid, 0)
-                        msg = (
-                            f"*{emoji} {name_ru}: x{qty} в стоке!*\n"
-                            f"💰 Цена — {price:,}¢\n"
-                            f"🕒 {now}\n\n*@GrowAGarden*"
-                        )
-                        await app.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
-                    last_qty[iid] = qty
-        await asyncio.sleep(10)
+async def monitor_job(context: ContextTypes.DEFAULT_TYPE):
+    data = fetch_all_stock()
+    if not data:
+        return
+    now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
+    for sec in ["seed_stock", "gear_stock", "cosmetic_stock", "egg_stock"]:
+        for it in data.get(sec, []):
+            iid, qty = it["item_id"], it["quantity"]
+            prev = last_qty.get(iid, 0)
+            if qty > prev and iid in NOTIFY_ITEMS:
+                name_ru = ITEM_NAME_RU.get(iid, it["display_name"])
+                emoji   = ITEM_EMOJI.get(iid, "")
+                price   = PRICE_MAP.get(iid, 0)
+                msg = (
+                    f"*{emoji} {name_ru}: x{qty} в стоке!*\n"
+                    f"💰 Цена — {price:,}¢\n"
+                    f"🕒 {now}\n\n*@GrowAGarden*"
+                )
+                await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
+            last_qty[iid] = qty
 
-# ====== Инициализация приложения ======
+# ====== Инициализация бота ======
 app = (
     ApplicationBuilder()
     .token(BOT_TOKEN)
-    .post_init(lambda app: app.create_task(monitor_stock_changes(app)))
     .build()
 )
 
-# Регистрируем обработчики
+# Регистрируем команды
 app.add_handler(CommandHandler("start",    start))
 app.add_handler(CommandHandler("stock",    handle_stock))
 app.add_handler(CommandHandler("cosmetic", handle_cosmetic))
@@ -229,8 +218,11 @@ app.add_handler(CallbackQueryHandler(handle_stock,    pattern="show_stock"))
 app.add_handler(CallbackQueryHandler(handle_cosmetic, pattern="show_cosmetic"))
 app.add_handler(CallbackQueryHandler(handle_weather,  pattern="show_weather"))
 
+# Регистрируем job: каждые 10 сек, первый запуск через 10 сек
+app.job_queue.run_repeating(monitor_job, interval=10, first=10)
+
 if __name__ == "__main__":
-    # Запуск Flask для keep-alive
+    # Запускаем Flask для keep-alive
     threading.Thread(target=run_flask, daemon=True).start()
-    # Запуск polling (без webhook!)
+    # Только polling, без webhook
     app.run_polling()
