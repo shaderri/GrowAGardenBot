@@ -1,4 +1,4 @@
-# bot_fixed.py
+# bot_improved.py
 import types
 import sys
 import os
@@ -7,12 +7,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import threading
 import asyncio
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
 import requests
 from flask import Flask
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -101,19 +101,26 @@ def home():
 def run_flask():
     flask_app.run(host="0.0.0.0", port=KEEPALIVE_PORT)
 
-# ====== Сетевые вызовы: выполняем blocking requests в thread ======
-def _sync_fetch_stock() -> Dict[str, Any]:
-    try:
-        headers = {"jstudio-key": JSTUDIO_KEY} if JSTUDIO_KEY else {}
-        resp = requests.get(STOCK_API, headers=headers, timeout=10)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        logger.exception("Sync fetch stock failed: %s", e)
-        return {}
+# ====== Сетевые вызовы: выполняем blocking requests в thread, с retry ======
+def _sync_fetch_stock_once() -> Dict[str, Any]:
+    headers = {"jstudio-key": JSTUDIO_KEY} if JSTUDIO_KEY else {}
+    resp = requests.get(STOCK_API, headers=headers, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+def _sync_fetch_stock_with_retries(retries: int = 2) -> Dict[str, Any]:
+    last_exc = None
+    for i in range(retries + 1):
+        try:
+            return _sync_fetch_stock_once()
+        except Exception as e:
+            last_exc = e
+            logger.warning("fetch attempt %d failed: %s", i+1, e)
+    logger.exception("All fetch attempts failed: %s", last_exc)
+    return {}
 
 async def fetch_all_stock() -> Dict[str, Any]:
-    return await asyncio.to_thread(_sync_fetch_stock)
+    return await asyncio.to_thread(_sync_fetch_stock_with_retries)
 
 # ====== Форматирование вывода ======
 def format_block(key: str, items: list) -> str:
@@ -121,7 +128,7 @@ def format_block(key: str, items: list) -> str:
         return ""
     emoji = CATEGORY_EMOJI.get(key, "•")
     title = key.replace("_stock", "").capitalize()
-    lines = [f"━ {emoji} *{title}* ━"]
+    lines = [f"━ {emoji} <b>{title}</b> ━"]
     for it in items:
         em = ITEM_EMOJI.get(it.get("item_id"), "•")
         display = it.get("display_name") or it.get("item_id") or "Unknown"
@@ -129,7 +136,12 @@ def format_block(key: str, items: list) -> str:
         lines.append(f"   {em} {display}: x{qty}")
     return "\n".join(lines) + "\n\n"
 
-# ====== Хранение состояния и lock для предотвращения гонок ======
+# ====== Очередь сообщений и состояния ======
+# messages_queue: список кортежей (iid, qty, text)
+messages_queue: List[Tuple[str, int, str]] = []
+# для предотвращения дублей в короткий промежуток (iid -> last sent qty)
+recently_sent: Dict[str, int] = {}
+
 last_qty: Dict[str, int] = {}
 last_in_stock: Dict[str, bool] = {}
 monitor_lock = asyncio.Lock()
@@ -137,12 +149,12 @@ monitor_lock = asyncio.Lock()
 # ====== Обработчики команд ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [
-        [InlineKeyboardButton := None],  # заглушка — если не используешь inline, можно убрать
+        [InlineKeyboardButton("📦 Стоки", callback_data="show_stock")],
+        [InlineKeyboardButton("💄 Косметика", callback_data="show_cosmetic")],
     ]
     try:
-        await update.message.reply_text("Бот запущен. Используй /stock для ручного запроса.")
+        await update.message.reply_text("Бот запущен. Используй /stock для ручного запроса.", reply_markup=InlineKeyboardMarkup(kb))
     except Exception:
-        # если update.message отсутствует (callback) — игнорируем
         pass
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -151,26 +163,40 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.callback_query.answer()
     data = await fetch_all_stock()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
-    text = f"*🕒 {now}*\n\n"
+    text = f"🕒 <b>{now}</b>\n\n"
     for sec in ["seed_stock", "gear_stock", "egg_stock", "cosmetic_stock"]:
         text += format_block(sec, data.get(sec, []))
-    await tgt.reply_text(text, parse_mode="Markdown")
+    await tgt.reply_text(text, parse_mode="HTML")
 
-# ====== Утилита: надежная отправка с ретраями ======
-async def send_with_retries(bot, chat_id, text, parse_mode="Markdown", attempts=3):
+# ====== Утилита: надежная отправка с ретраями и fallback ======
+async def send_with_retries_and_fallback(bot, chat_id, text_html: str, attempts: int = 3):
+    """
+    Сначала пытаемся отправить как HTML. Если ошибка (BadRequest-parse),
+    пробуем отправить без parse_mode (чистый текст). Повторяем attempts раз.
+    """
     last_exc = None
-    for i in range(attempts):
+    for attempt in range(1, attempts + 1):
         try:
-            await bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode)
+            await bot.send_message(chat_id=chat_id, text=text_html, parse_mode="HTML")
             return True
         except Exception as e:
             last_exc = e
-            logger.warning("send_message failed (attempt %d/%d): %s", i+1, attempts, e)
-            await asyncio.sleep(0.5 * (i+1))
-    logger.exception("send_message failed after %d attempts. Last error: %s", attempts, last_exc)
+            # Если ошибка парсинга (часто telegram.error.BadRequest с сообщением о parse mode),
+            # попробуем отправить как чистый текст (без parse_mode).
+            logger.warning("send attempt %d failed: %s", attempt, e)
+            if attempt == attempts:
+                # окончательная попытка — без parse_mode
+                try:
+                    await bot.send_message(chat_id=chat_id, text=text_html)
+                    return True
+                except Exception as e2:
+                    logger.exception("Final fallback send also failed: %s", e2)
+                    return False
+            await asyncio.sleep(0.5 * attempt)
+    logger.exception("All send attempts failed, last error: %s", last_exc)
     return False
 
-# ====== Основной мониторинг стока ======
+# ====== Job: мониторим сток и кладём в очередь (только собираем) ======
 async def monitor_job(context: ContextTypes.DEFAULT_TYPE):
     # предотвращаем параллельные запуски
     if monitor_lock.locked():
@@ -185,8 +211,7 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE):
                 return
 
             now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
-            messages = []
-            # локальные изменения состояния, применим после формирования сообщений
+            new_messages: List[Tuple[str, int, str]] = []
             local_qty_updates: Dict[str, int] = {}
             local_instock_updates: Dict[str, bool] = {}
 
@@ -203,41 +228,69 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE):
                     was_in = last_in_stock.get(iid, False)
                     now_in = qty > 0
 
-                    # условие уведомления
+                    # уведомление: появление или рост количества
                     if iid in NOTIFY_ITEMS and ((now_in and not was_in) or (qty > prev_qty)):
                         name_ru = ITEM_NAME_RU.get(iid, it.get('display_name') or iid)
                         emoji = ITEM_EMOJI.get(iid, "")
                         price = PRICE_MAP.get(iid, 0)
                         price_str = f"{price:,}" if isinstance(price, int) else str(price)
-                        msg = (
-                            f"*{emoji} {name_ru}: x{qty} в стоке!*\n"
+                        text_html = (
+                            f"<b>{emoji} {name_ru}: x{qty} в стоке!</b>\n"
                             f"💰 Цена — {price_str}¢\n"
-                            f"🕒 {now}\n\n*@GroowAGarden*"
+                            f"🕒 {now}\n\n@GroowAGarden"
                         )
-                        messages.append((iid, msg))
-                        logger.info("Запланировано уведомление для %s (qty %s > prev %s, was_in=%s->now_in=%s)",
-                                    iid, qty, prev_qty, was_in, now_in)
+                        # Проверка на недавнюю отправку (избегаем дублей)
+                        last_sent_qty = recently_sent.get(iid)
+                        if last_sent_qty is not None and last_sent_qty == qty:
+                            logger.info("Дубликат по количеству для %s (qty=%s) — пропускаем enqueue", iid, qty)
+                        else:
+                            new_messages.append((iid, qty, text_html))
+                            logger.info("Enqueue: %s qty=%s (prev=%s, was_in=%s->now_in=%s)", iid, qty, prev_qty, was_in, now_in)
 
-                    # формируем локальные обновления
+                    # собираем локальные обновления (будут применены единовременно)
                     local_qty_updates[iid] = qty
                     local_instock_updates[iid] = now_in
 
-            # обновляем глобальное состояние ОДНИМ проходом (чтобы не было несогласованности)
+            # применяем обновления состояния
             last_qty.update(local_qty_updates)
             last_in_stock.update(local_instock_updates)
 
-            # отправляем все сообщения последовательно с retry, но не мешаем остальным, если одно упадёт
-            if messages:
-                logger.info("Отправляем %d сообщений...", len(messages))
-                for iid, msg in messages:
-                    try:
-                        await send_with_retries(context.bot, CHANNEL_ID, msg, parse_mode="Markdown", attempts=3)
-                        # небольшая пауза между сообщениями
-                        await asyncio.sleep(0.25)
-                    except Exception as e:
-                        logger.exception("Не удалось отправить сообщение для %s: %s", iid, e)
+            # добавляем в основную очередь (в одном потоке — job_queue гарантирует последовательность)
+            if new_messages:
+                before = len(messages_queue)
+                messages_queue.extend(new_messages)
+                logger.info("Добавлено %d сообщений в очередь (до=%d, после=%d)", len(new_messages), before, len(messages_queue))
         except Exception as e:
             logger.exception("Ошибка в monitor_job: %s", e)
+
+# ====== Job: отправщик очереди (в отдельном job, раз в 1s) ======
+async def sender_job(context: ContextTypes.DEFAULT_TYPE):
+    if not messages_queue:
+        return
+    # заберём до N сообщений за проход чтобы не перегрузить
+    MAX_PER_PASS = 20
+    to_send = []
+    # извлекаем из общей очереди сначала
+    while messages_queue and len(to_send) < MAX_PER_PASS:
+        to_send.append(messages_queue.pop(0))
+
+    logger.info("Sender job: отправляем %d сообщений (оставшихся в очереди: %d)", len(to_send), len(messages_queue))
+    for iid, qty, text_html in to_send:
+        try:
+            ok = await send_with_retries_and_fallback(context.bot, CHANNEL_ID, text_html, attempts=3)
+            if ok:
+                # помечаем как отправленное, чтобы не задублировать при тех же qty
+                recently_sent[iid] = qty
+                logger.info("Sent: %s qty=%s", iid, qty)
+            else:
+                # если не удалось — ставим обратно в очередь в конец для повторной попытки позже
+                messages_queue.append((iid, qty, text_html))
+                logger.warning("Не удалось отправить %s — возвращаем в очередь (сейчас длина %d)", iid, len(messages_queue))
+            # пауза между отправками
+            await asyncio.sleep(0.25)
+        except Exception as e:
+            logger.exception("Ошибка при отправке %s: %s — возвращаем в очередь", iid, e)
+            messages_queue.append((iid, qty, text_html))
 
 # ====== Инициализация бота ======
 def main():
@@ -251,11 +304,13 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
     app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_cosmetic"))
 
-    # job_queue: интервал можно настроить (в секундах)
-    # если хотите реже — поставьте interval=15 или 30
-    app.job_queue.run_repeating(monitor_job, interval=10, first=10)
+    # Планирование: мониторим и кладём в очередь
+    # monitor_job — проверка API (интервал можно увеличить)
+    app.job_queue.run_repeating(monitor_job, interval=10, first=5)
+    # sender_job — обрабатывает очередь и отправляет, часто (1 сек)
+    app.job_queue.run_repeating(sender_job, interval=1, first=7)
 
-    # keepalive flask (опционально)
+    # Keepalive flask (опционально)
     threading.Thread(target=run_flask, daemon=True).start()
 
     logger.info("Запуск бота...")
