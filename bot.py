@@ -1,10 +1,8 @@
-# bot_render_safe.py
 import os
 import sys
 import signal
 import logging
 import threading
-import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Tuple
@@ -47,7 +45,7 @@ def parse_channel_id(val: str):
 
 CHANNEL_ID = parse_channel_id(CHANNEL_ID_ENV)
 
-# ====== Конфигурация API и карты ======
+# ====== Конфигурация API и карты (как у тебя) ======
 STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
 
 CATEGORY_EMOJI = {
@@ -141,7 +139,7 @@ def remove_lock():
     except Exception as e:
         logger.exception("Ошибка при удалении lock: %s", e)
 
-# ====== Сетевые вызовы ======
+# ====== Fetch (sync -> thread) ======
 def _sync_fetch_stock_once() -> Dict[str, Any]:
     headers = {"jstudio-key": JSTUDIO_KEY} if JSTUDIO_KEY else {}
     resp = requests.get(STOCK_API, headers=headers, timeout=10)
@@ -160,6 +158,7 @@ def _sync_fetch_stock_with_retries(retries: int = 2) -> Dict[str, Any]:
     return {}
 
 async def fetch_all_stock() -> Dict[str, Any]:
+    import asyncio
     return await asyncio.to_thread(_sync_fetch_stock_with_retries)
 
 # ====== Форматирование ======
@@ -176,11 +175,12 @@ def format_block(key: str, items: list) -> str:
         lines.append(f"   {em} {display}: x{qty}")
     return "\n".join(lines) + "\n\n"
 
-# ====== Очередь сообщений и состояние ======
+# ====== Очередь и состояние ======
 messages_queue: List[Tuple[str, int, str]] = []
 recently_sent: Dict[str, int] = {}
 last_qty: Dict[str, int] = {}
 last_in_stock: Dict[str, bool] = {}
+import asyncio
 monitor_lock = asyncio.Lock()
 
 # ====== Handlers ======
@@ -205,7 +205,7 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += format_block(sec, data.get(sec, []))
     await tgt.reply_text(text, parse_mode="HTML")
 
-# ====== Отправка с fallback ======
+# ====== Send with fallback ======
 async def send_with_retries_and_fallback(bot, chat_id, text_html: str, attempts: int = 3):
     last_exc = None
     for attempt in range(1, attempts + 1):
@@ -226,7 +226,7 @@ async def send_with_retries_and_fallback(bot, chat_id, text_html: str, attempts:
     logger.exception("All send attempts failed, last error: %s", last_exc)
     return False
 
-# ====== monitor_job (кладёт в очередь) ======
+# ====== monitor_job ======
 async def monitor_job(context: ContextTypes.DEFAULT_TYPE):
     if monitor_lock.locked():
         logger.info("monitor_job пропущен: предыдущий ещё выполняется")
@@ -287,7 +287,7 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.exception("Ошибка в monitor_job: %s", e)
 
-# ====== sender_job (отправляет очередь) ======
+# ====== sender_job ======
 async def sender_job(context: ContextTypes.DEFAULT_TYPE):
     if not messages_queue:
         return
@@ -311,47 +311,6 @@ async def sender_job(context: ContextTypes.DEFAULT_TYPE):
             logger.exception("Ошибка при отправке %s: %s — возвращаем в очередь", iid, e)
             messages_queue.append((iid, qty, text_html))
 
-# ====== Функция запуска бота (в отдельном потоке) ======
-def run_bot():
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN не задан — выходим.")
-        return
-
-    # Создаём и привязываем event loop к этому потоку
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    logger.info("New event loop created for bot thread: %s", loop)
-
-    # Будем пытаться перезапускать polling, если он упадёт
-    while True:
-        try:
-            app = ApplicationBuilder().token(BOT_TOKEN).build()
-            app.add_handler(CommandHandler("start", start_handler))
-            app.add_handler(CommandHandler("stock", handle_stock))
-            app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
-            app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_cosmetic"))
-
-            # job_queue
-            app.job_queue.run_repeating(monitor_job, interval=10, first=5)
-            app.job_queue.run_repeating(sender_job, interval=1, first=7)
-
-            logger.info("Запуск polling в background thread...")
-            # blocking call; если он будет падать, перейдём в except и перезапустим через паузу
-            app.run_polling()
-            # Если run_polling вернул (корректно завершился), выходим из цикла
-            logger.info("app.run_polling() завершился корректно — выходим из run_bot loop")
-            break
-        except Exception as e:
-            logger.exception("Ошибка в run_polling: %s", e)
-            logger.info("Пробуем перезапустить polling через 5 секунд...")
-            try:
-                # небольшая пауза перед повторной попыткой
-                import time
-                time.sleep(5)
-            except Exception:
-                pass
-    # НЕ удаляем lock здесь — main() удалит lock при завершении всего процесса
-
 # ====== Обработка сигналов ======
 def handle_termination(signum, frame):
     logger.info("Получен сигнал %s — завершаем процесс.", signum)
@@ -361,20 +320,40 @@ def handle_termination(signum, frame):
 signal.signal(signal.SIGINT, handle_termination)
 signal.signal(signal.SIGTERM, handle_termination)
 
-# ====== Main: acquire lock, стартуем bot в потоке, запускаем flask (главный поток) ======
+# ====== Main: acquire lock, стартуем Flask в thread, запускаем polling в main thread ======
 def main():
     acquire_lock_or_exit()
 
-    # старт бота в фоновом потоке
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-    logger.info("Bot thread started (daemon). Запускаем Flask в основном потоке на порту %s", KEEPALIVE_PORT)
+    # Запускаем Flask в фоновом потоке (use_reloader=False важно)
+    flask_thread = threading.Thread(
+        target=lambda: flask_app.run(host="0.0.0.0", port=KEEPALIVE_PORT, use_reloader=False),
+        daemon=True,
+    )
+    flask_thread.start()
+    logger.info("Flask thread started (daemon) on port %s", KEEPALIVE_PORT)
 
-    # Запуск Flask в основном потоке (Render ожидает работающий web service)
+    # Теперь запускаем polling в главном потоке — это важно для signal handlers
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN не задан — выходим.")
+        remove_lock()
+        return
+
     try:
-        flask_app.run(host="0.0.0.0", port=KEEPALIVE_PORT)
+        app = ApplicationBuilder().token(BOT_TOKEN).build()
+        app.add_handler(CommandHandler("start", start_handler))
+        app.add_handler(CommandHandler("stock", handle_stock))
+        app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
+        app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_cosmetic"))
+
+        # job_queue
+        app.job_queue.run_repeating(monitor_job, interval=10, first=5)
+        app.job_queue.run_repeating(sender_job, interval=1, first=7)
+
+        logger.info("Запуск polling в главном потоке...")
+        app.run_polling()  # <-- запускается в main thread, signal handlers будут работать
+        logger.info("app.run_polling() завершился (обычно при stop).")
     except Exception as e:
-        logger.exception("Flask stopped with error: %s", e)
+        logger.exception("Ошибка при run_polling: %s", e)
     finally:
         remove_lock()
 
