@@ -1,3 +1,4 @@
+# bot_fixed.py
 import types
 import sys
 import os
@@ -6,11 +7,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import threading
 import asyncio
+from typing import Any, Dict
 
 import requests
 from flask import Flask
 from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -18,25 +20,43 @@ from telegram.ext import (
     ContextTypes,
 )
 
+# ====== Логирование ======
 logging.basicConfig(
     format="%(asctime)s %(levelname)s:%(name)s: %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
+# ====== Monkey-patch imghdr для Python 3.13 (если нужно) ======
 if "imghdr" not in sys.modules:
     mod = types.ModuleType("imghdr")
     mod.what = lambda *args, **kwargs: None
     sys.modules["imghdr"] = mod
 
+# ====== Переменные окружения ======
 load_dotenv()
-BOT_TOKEN      = os.getenv("BOT_TOKEN")
-CHANNEL_ID     = os.getenv("CHANNEL_ID")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID_ENV = os.getenv("CHANNEL_ID")
 KEEPALIVE_PORT = int(os.getenv("PORT", 10000))
-JSTUDIO_KEY    = os.getenv("JSTUDIO_KEY")
+JSTUDIO_KEY = os.getenv("JSTUDIO_KEY")
 
-STOCK_API   = "https://api.joshlei.com/v2/growagarden/stock"
+def parse_channel_id(val: str):
+    if val is None:
+        return None
+    s = val.strip()
+    if s.startswith("@"):
+        return s
+    try:
+        return int(s)
+    except Exception:
+        return s
 
+CHANNEL_ID = parse_channel_id(CHANNEL_ID_ENV)
+
+# ====== Конфигурация API ======
+STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
+
+# ====== Эмоджи и карты ======
 CATEGORY_EMOJI = {
     "seed_stock":     "🌱",
     "gear_stock":     "🧰",
@@ -72,6 +92,7 @@ PRICE_MAP = {
     "levelup_lollipop":10_000_000_000,"elder_strawberry":70_000_000
 }
 
+# ====== Flask keepalive (опционально) ======
 flask_app = Flask(__name__)
 @flask_app.route("/")
 def home():
@@ -80,19 +101,21 @@ def home():
 def run_flask():
     flask_app.run(host="0.0.0.0", port=KEEPALIVE_PORT)
 
-def fetch_all_stock():
+# ====== Сетевые вызовы: выполняем blocking requests в thread ======
+def _sync_fetch_stock() -> Dict[str, Any]:
     try:
-        resp = requests.get(
-            STOCK_API,
-            headers={"jstudio-key": JSTUDIO_KEY},
-            timeout=10
-        )
+        headers = {"jstudio-key": JSTUDIO_KEY} if JSTUDIO_KEY else {}
+        resp = requests.get(STOCK_API, headers=headers, timeout=10)
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        logger.error(f"Stock fetch error: {e}")
+        logger.exception("Sync fetch stock failed: %s", e)
         return {}
 
+async def fetch_all_stock() -> Dict[str, Any]:
+    return await asyncio.to_thread(_sync_fetch_stock)
+
+# ====== Форматирование вывода ======
 def format_block(key: str, items: list) -> str:
     if not items:
         return ""
@@ -100,70 +123,143 @@ def format_block(key: str, items: list) -> str:
     title = key.replace("_stock", "").capitalize()
     lines = [f"━ {emoji} *{title}* ━"]
     for it in items:
-        em = ITEM_EMOJI.get(it["item_id"], "•")
-        lines.append(f"   {em} {it['display_name']}: x{it['quantity']}")
+        em = ITEM_EMOJI.get(it.get("item_id"), "•")
+        display = it.get("display_name") or it.get("item_id") or "Unknown"
+        qty = it.get("quantity", 0)
+        lines.append(f"   {em} {display}: x{qty}")
     return "\n".join(lines) + "\n\n"
 
+# ====== Хранение состояния и lock для предотвращения гонок ======
+last_qty: Dict[str, int] = {}
+last_in_stock: Dict[str, bool] = {}
+monitor_lock = asyncio.Lock()
+
+# ====== Обработчики команд ======
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [
-        [InlineKeyboardButton("📦 Стоки",    callback_data="show_stock")],
-        [InlineKeyboardButton("💄 Косметика", callback_data="show_cosmetic")],
+        [InlineKeyboardButton := None],  # заглушка — если не используешь inline, можно убрать
     ]
-    await update.message.reply_text("Привет! Выбери действие:", reply_markup=InlineKeyboardMarkup(kb))
+    try:
+        await update.message.reply_text("Бот запущен. Используй /stock для ручного запроса.")
+    except Exception:
+        # если update.message отсутствует (callback) — игнорируем
+        pass
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tgt = update.callback_query.message if update.callback_query else update.message
     if update.callback_query:
         await update.callback_query.answer()
-    data = fetch_all_stock()
+    data = await fetch_all_stock()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
     text = f"*🕒 {now}*\n\n"
     for sec in ["seed_stock", "gear_stock", "egg_stock", "cosmetic_stock"]:
         text += format_block(sec, data.get(sec, []))
-    await tgt.reply_markdown(text)
+    await tgt.reply_text(text, parse_mode="Markdown")
 
-last_qty = {}
-last_in_stock = {}
+# ====== Утилита: надежная отправка с ретраями ======
+async def send_with_retries(bot, chat_id, text, parse_mode="Markdown", attempts=3):
+    last_exc = None
+    for i in range(attempts):
+        try:
+            await bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode)
+            return True
+        except Exception as e:
+            last_exc = e
+            logger.warning("send_message failed (attempt %d/%d): %s", i+1, attempts, e)
+            await asyncio.sleep(0.5 * (i+1))
+    logger.exception("send_message failed after %d attempts. Last error: %s", attempts, last_exc)
+    return False
 
+# ====== Основной мониторинг стока ======
 async def monitor_job(context: ContextTypes.DEFAULT_TYPE):
-    data = fetch_all_stock()
-    if not data:
+    # предотвращаем параллельные запуски
+    if monitor_lock.locked():
+        logger.info("monitor_job пропущен: предыдущий ещё выполняется")
         return
-    now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
-    messages_to_send = []
-    for sec in ["seed_stock", "gear_stock", "egg_stock", "cosmetic_stock"]:
-        for it in data.get(sec, []):
-            iid, qty = it['item_id'], it['quantity']
-            prev_qty = last_qty.get(iid, 0)
-            was_in = last_in_stock.get(iid, False)
-            now_in = qty > 0
-            if iid in NOTIFY_ITEMS and (now_in and not was_in or qty > prev_qty):
-                name_ru = ITEM_NAME_RU.get(iid, it['display_name'])
-                emoji = ITEM_EMOJI.get(iid, "")
-                price = PRICE_MAP.get(iid, 0)
-                msg = (
-                    f"*{emoji} {name_ru}: x{qty} в стоке!*\n"
-                    f"💰 Цена — {price:,}¢\n"
-                    f"🕒 {now}\n\n*@GroowAGarden*"
-                )
-                messages_to_send.append(msg)
-            last_qty[iid] = qty
-            last_in_stock[iid] = now_in
-    for msg in messages_to_send:
-        await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="Markdown")
 
-app = (
-    ApplicationBuilder()
-    .token(BOT_TOKEN)
-    .build()
-)
+    async with monitor_lock:
+        try:
+            data = await fetch_all_stock()
+            if not data:
+                logger.debug("fetch_all_stock вернул пусто — пропускаем обновление состояния")
+                return
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("stock", handle_stock))
-app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
+            now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
+            messages = []
+            # локальные изменения состояния, применим после формирования сообщений
+            local_qty_updates: Dict[str, int] = {}
+            local_instock_updates: Dict[str, bool] = {}
 
-app.job_queue.run_repeating(monitor_job, interval=10, first=10)
+            for sec in ["seed_stock", "gear_stock", "egg_stock", "cosmetic_stock"]:
+                for it in data.get(sec, []):
+                    iid = it.get("item_id")
+                    if iid is None:
+                        continue
+                    try:
+                        qty = int(it.get("quantity", 0))
+                    except Exception:
+                        qty = 0
+                    prev_qty = last_qty.get(iid, 0)
+                    was_in = last_in_stock.get(iid, False)
+                    now_in = qty > 0
+
+                    # условие уведомления
+                    if iid in NOTIFY_ITEMS and ((now_in and not was_in) or (qty > prev_qty)):
+                        name_ru = ITEM_NAME_RU.get(iid, it.get('display_name') or iid)
+                        emoji = ITEM_EMOJI.get(iid, "")
+                        price = PRICE_MAP.get(iid, 0)
+                        price_str = f"{price:,}" if isinstance(price, int) else str(price)
+                        msg = (
+                            f"*{emoji} {name_ru}: x{qty} в стоке!*\n"
+                            f"💰 Цена — {price_str}¢\n"
+                            f"🕒 {now}\n\n*@GroowAGarden*"
+                        )
+                        messages.append((iid, msg))
+                        logger.info("Запланировано уведомление для %s (qty %s > prev %s, was_in=%s->now_in=%s)",
+                                    iid, qty, prev_qty, was_in, now_in)
+
+                    # формируем локальные обновления
+                    local_qty_updates[iid] = qty
+                    local_instock_updates[iid] = now_in
+
+            # обновляем глобальное состояние ОДНИМ проходом (чтобы не было несогласованности)
+            last_qty.update(local_qty_updates)
+            last_in_stock.update(local_instock_updates)
+
+            # отправляем все сообщения последовательно с retry, но не мешаем остальным, если одно упадёт
+            if messages:
+                logger.info("Отправляем %d сообщений...", len(messages))
+                for iid, msg in messages:
+                    try:
+                        await send_with_retries(context.bot, CHANNEL_ID, msg, parse_mode="Markdown", attempts=3)
+                        # небольшая пауза между сообщениями
+                        await asyncio.sleep(0.25)
+                    except Exception as e:
+                        logger.exception("Не удалось отправить сообщение для %s: %s", iid, e)
+        except Exception as e:
+            logger.exception("Ошибка в monitor_job: %s", e)
+
+# ====== Инициализация бота ======
+def main():
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN не задан — выходим.")
+        return
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("stock", handle_stock))
+    app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
+    app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_cosmetic"))
+
+    # job_queue: интервал можно настроить (в секундах)
+    # если хотите реже — поставьте interval=15 или 30
+    app.job_queue.run_repeating(monitor_job, interval=10, first=10)
+
+    # keepalive flask (опционально)
+    threading.Thread(target=run_flask, daemon=True).start()
+
+    logger.info("Запуск бота...")
+    app.run_polling()
 
 if __name__ == "__main__":
-    threading.Thread(target=run_flask, daemon=True).start()
-    app.run_polling()
+    main()
