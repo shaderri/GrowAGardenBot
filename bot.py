@@ -1,3 +1,4 @@
+# bot_render_safe.py
 import os
 import sys
 import signal
@@ -96,23 +97,16 @@ LOCK_FILE = "/tmp/growagarden_bot.lock"
 
 def is_pid_running(pid: int) -> bool:
     try:
-        # signal 0 doesn't send a signal but checks process existence on Unix
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
-        # есть процесс, но нет прав — считаем, что он запущен
         return True
     except Exception:
         return False
     return True
 
 def acquire_lock_or_exit():
-    """
-    Проверяем файл-блокировку. Если он есть и PID жив — выходим.
-    Если есть, но PID мёртв — удаляем файл и продолжаем.
-    Иначе создаём файл с текущим PID.
-    """
     if os.path.exists(LOCK_FILE):
         try:
             with open(LOCK_FILE, "r") as f:
@@ -131,7 +125,6 @@ def acquire_lock_or_exit():
             except Exception:
                 pass
 
-    # Создаём lock
     try:
         with open(LOCK_FILE, "w") as f:
             f.write(str(os.getpid()))
@@ -322,36 +315,47 @@ async def sender_job(context: ContextTypes.DEFAULT_TYPE):
 def run_bot():
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN не задан — выходим.")
-        remove_lock()
         return
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start_handler))
-    app.add_handler(CommandHandler("stock", handle_stock))
-    app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
-    app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_cosmetic"))
+    # Создаём и привязываем event loop к этому потоку
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    logger.info("New event loop created for bot thread: %s", loop)
 
-    # job_queue
-    app.job_queue.run_repeating(monitor_job, interval=10, first=5)
-    app.job_queue.run_repeating(sender_job, interval=1, first=7)
-
-    try:
-        logger.info("Запуск polling в background thread...")
-        app.run_polling()
-    except Exception as e:
-        logger.exception("Ошибка в run_polling: %s", e)
-    finally:
-        # на случай завершения
+    # Будем пытаться перезапускать polling, если он упадёт
+    while True:
         try:
-            remove_lock()
-        except Exception:
-            pass
+            app = ApplicationBuilder().token(BOT_TOKEN).build()
+            app.add_handler(CommandHandler("start", start_handler))
+            app.add_handler(CommandHandler("stock", handle_stock))
+            app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
+            app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_cosmetic"))
+
+            # job_queue
+            app.job_queue.run_repeating(monitor_job, interval=10, first=5)
+            app.job_queue.run_repeating(sender_job, interval=1, first=7)
+
+            logger.info("Запуск polling в background thread...")
+            # blocking call; если он будет падать, перейдём в except и перезапустим через паузу
+            app.run_polling()
+            # Если run_polling вернул (корректно завершился), выходим из цикла
+            logger.info("app.run_polling() завершился корректно — выходим из run_bot loop")
+            break
+        except Exception as e:
+            logger.exception("Ошибка в run_polling: %s", e)
+            logger.info("Пробуем перезапустить polling через 5 секунд...")
+            try:
+                # небольшая пауза перед повторной попыткой
+                import time
+                time.sleep(5)
+            except Exception:
+                pass
+    # НЕ удаляем lock здесь — main() удалит lock при завершении всего процесса
 
 # ====== Обработка сигналов ======
 def handle_termination(signum, frame):
     logger.info("Получен сигнал %s — завершаем процесс.", signum)
     remove_lock()
-    # грубое завершение процесса — Render перезапустит контейнер
     os._exit(0)
 
 signal.signal(signal.SIGINT, handle_termination)
