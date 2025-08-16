@@ -28,7 +28,7 @@ CATEGORY_EMOJI = {
     "seed_stock": "🌱",
     "gear_stock": "🧰",
     "egg_stock": "🥚",
-    "event_stock": "🎉",  # новая категория
+    "eventshop_stock": "🫛",  # новая категория
 }
 
 ITEM_EMOJI = {
@@ -82,7 +82,7 @@ TITLE_MAP = {
     "seed_stock": "*Seeds*",
     "gear_stock": "*Gear*",
     "egg_stock": "*Eggs*",
-    "event_stock": "*Event*",
+    "eventshop_stock": "*Event*",
 }
 
 # Fetchers (с ключом в заголовке)
@@ -167,7 +167,7 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
     text = f"*🕒 {now}*\n\n" + "".join(
         format_block(sec, data.get(sec, []))
-        for sec in ["seed_stock", "gear_stock", "egg_stock", "event_stock"]
+        for sec in ["seed_stock", "gear_stock", "egg_stock", "eventshop_stock"]
     )
     await tgt.reply_markdown(text)
 
