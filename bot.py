@@ -57,6 +57,7 @@ ITEM_EMOJI = {
     "grandmaster_sprinkler": "💦",
     "levelup_lollipop": "🍭",
     "elder_strawberry": "🍓",
+    "romanesco": "🥦",
     "paradise_egg": "🐣",
     "bug_egg": "🐣",
 }
@@ -77,7 +78,8 @@ ITEM_NAME_RU = {
     "master_sprinkler": "Мастер спринклер",
     "grandmaster_sprinkler": "Грандмастер спринклер",
     "levelup_lollipop": "Леденец уровня",
-    "elder_strawberry": "Бузинная клубника"
+    "elder_strawberry": "Бузинная клубника",
+    "romanesco": "Романеско",
 }
 
 # Items to notify about
@@ -85,7 +87,7 @@ NOTIFY_ITEMS = [
     "grape", "mushroom", "pepper", "cacao",
     "beanstalk", "ember_lily", "sugar_apple",
     "burning_bud", "giant_pinecone",
-    "master_sprinkler", "grandmaster_sprinkler", "levelup_lollipop", "elder_strawberry"
+    "master_sprinkler", "grandmaster_sprinkler", "levelup_lollipop", "elder_strawberry", "romanesco"
 ]
 
 # Prices for notifications (in ¢)
@@ -104,7 +106,8 @@ PRICE_MAP = {
     "master_sprinkler": 10_000_000,
     "grandmaster_sprinkler": 1_000_000_000,
     "levelup_lollipop": 10_000_000_000,
-    "elder_strawberry": 70_000_000
+    "elder_strawberry": 70_000_000,
+    "romanesco":  88_000_000,
 }
 
 # APIs
