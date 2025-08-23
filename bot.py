@@ -18,6 +18,9 @@ from telegram.ext import (
     ContextTypes,
 )
 
+import asyncio
+import types
+
 # ====== Настройка логов ======
 logging.basicConfig(
     format="%(asctime)s %(levelname)s:%(name)s: %(message)s",
@@ -32,6 +35,7 @@ CHANNEL_ID_ENV = os.getenv("CHANNEL_ID")
 KEEPALIVE_PORT = int(os.getenv("PORT", 10000))
 JSTUDIO_KEY = os.getenv("JSTUDIO_KEY")
 
+
 def parse_channel_id(val: str):
     if val is None:
         return None
@@ -42,6 +46,7 @@ def parse_channel_id(val: str):
         return int(s)
     except Exception:
         return s
+
 
 CHANNEL_ID = parse_channel_id(CHANNEL_ID_ENV)
 
@@ -131,6 +136,7 @@ def home():
 # ====== Lock (PID file) ======
 LOCK_FILE = "/tmp/growagarden_bot.lock"
 
+
 def is_pid_running(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -141,6 +147,7 @@ def is_pid_running(pid: int) -> bool:
     except Exception:
         return False
     return True
+
 
 def acquire_lock_or_exit():
     if os.path.exists(LOCK_FILE):
@@ -169,6 +176,7 @@ def acquire_lock_or_exit():
         logger.exception("Не удалось создать lock file: %s", e)
         sys.exit(1)
 
+
 def remove_lock():
     try:
         if os.path.exists(LOCK_FILE):
@@ -184,6 +192,7 @@ def _sync_fetch_stock_once() -> Dict[str, Any]:
     resp.raise_for_status()
     return resp.json()
 
+
 def _sync_fetch_stock_with_retries(retries: int = 2) -> Dict[str, Any]:
     last_exc = None
     for i in range(retries + 1):
@@ -195,8 +204,8 @@ def _sync_fetch_stock_with_retries(retries: int = 2) -> Dict[str, Any]:
     logger.exception("All fetch attempts failed: %s", last_exc)
     return {}
 
+
 async def fetch_all_stock() -> Dict[str, Any]:
-    import asyncio
     return await asyncio.to_thread(_sync_fetch_stock_with_retries)
 
 # ====== Форматирование ======
@@ -218,7 +227,6 @@ messages_queue: List[Tuple[str, int, str]] = []
 recently_sent: Dict[str, int] = {}
 last_qty: Dict[str, int] = {}
 last_in_stock: Dict[str, bool] = {}
-import asyncio
 monitor_lock = asyncio.Lock()
 
 # ====== Handlers ======
@@ -228,12 +236,16 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💄 Косметика", callback_data="show_cosmetic")],
     ]
     try:
-        await update.message.reply_text("Бот запущен. Используй /stock для ручного запроса.", reply_markup=InlineKeyboardMarkup(kb))
+        if update.message:
+            await update.message.reply_text("Бот запущен. Используй /stock для ручного запроса.", reply_markup=InlineKeyboardMarkup(kb))
+        else:
+            await update.effective_chat.send_message("Бот запущен. Используй /stock для ручного запроса.", reply_markup=InlineKeyboardMarkup(kb))
     except Exception:
         pass
 
+
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tgt = update.callback_query.message if update.callback_query else update.message
+    tgt = update.callback_query.message if update.callback_query and update.callback_query.message else update.message
     if update.callback_query:
         await update.callback_query.answer()
     data = await fetch_all_stock()
@@ -241,7 +253,8 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = f"🕒 <b>{now}</b>\n\n"
     for sec in ["seed_stock", "gear_stock", "egg_stock", "cosmetic_stock"]:
         text += format_block(sec, data.get(sec, []))
-    await tgt.reply_text(text, parse_mode="HTML")
+    if tgt:
+        await tgt.reply_text(text, parse_mode="HTML")
 
 # ====== Send with fallback ======
 async def send_with_retries_and_fallback(bot, chat_id, text_html: str, attempts: int = 3):
@@ -265,7 +278,8 @@ async def send_with_retries_and_fallback(bot, chat_id, text_html: str, attempts:
     return False
 
 # ====== monitor_job ======
-async def monitor_job(context: ContextTypes.DEFAULT_TYPE):
+async def monitor_job(context: ContextTypes.DEFAULT_TYPE | None = None):
+    # context is optional because we may call this from custom loops
     if monitor_lock.locked():
         logger.info("monitor_job пропущен: предыдущий ещё выполняется")
         return
@@ -325,8 +339,9 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.exception("Ошибка в monitor_job: %s", e)
 
+
 # ====== sender_job ======
-async def sender_job(context: ContextTypes.DEFAULT_TYPE):
+async def sender_job(context: ContextTypes.DEFAULT_TYPE | None = None):
     if not messages_queue:
         return
     MAX_PER_PASS = 20
@@ -337,7 +352,20 @@ async def sender_job(context: ContextTypes.DEFAULT_TYPE):
     logger.info("Sender job: отправляем %d сообщений (оставшихся в очереди: %d)", len(to_send), len(messages_queue))
     for iid, qty, text_html in to_send:
         try:
-            ok = await send_with_retries_and_fallback(context.bot, CHANNEL_ID, text_html, attempts=3)
+            bot = None
+            if context is not None and hasattr(context, 'bot'):
+                bot = context.bot
+            else:
+                # fallback: try to use global Application bot if available
+                bot = globals().get('APP_BOT')
+
+            if bot is None:
+                # can't send right now, push back and abort
+                messages_queue.append((iid, qty, text_html))
+                logger.warning("Нет bot в sender_job — отложено отправление %s", iid)
+                return
+
+            ok = await send_with_retries_and_fallback(bot, CHANNEL_ID, text_html, attempts=3)
             if ok:
                 recently_sent[iid] = qty
                 logger.info("Sent: %s qty=%s", iid, qty)
@@ -349,6 +377,7 @@ async def sender_job(context: ContextTypes.DEFAULT_TYPE):
             logger.exception("Ошибка при отправке %s: %s — возвращаем в очередь", iid, e)
             messages_queue.append((iid, qty, text_html))
 
+
 # ====== Обработка сигналов ======
 def handle_termination(signum, frame):
     logger.info("Получен сигнал %s — завершаем процесс.", signum)
@@ -357,6 +386,30 @@ def handle_termination(signum, frame):
 
 signal.signal(signal.SIGINT, handle_termination)
 signal.signal(signal.SIGTERM, handle_termination)
+
+
+# ====== Вспомогательные фоновые циклы (если job_queue отсутствует) ======
+async def _background_monitor_loop(app):
+    # first run after 5s
+    await asyncio.sleep(5)
+    while True:
+        try:
+            await monitor_job(None)
+        except Exception:
+            logger.exception("Ошибка в _background_monitor_loop")
+        await asyncio.sleep(10)
+
+
+async def _background_sender_loop(app):
+    await asyncio.sleep(7)
+    while True:
+        try:
+            ctx = types.SimpleNamespace(bot=getattr(app, 'bot', None))
+            await sender_job(ctx)
+        except Exception:
+            logger.exception("Ошибка в _background_sender_loop")
+        await asyncio.sleep(1)
+
 
 # ====== Main: acquire lock, стартуем Flask в thread, запускаем polling в main thread ======
 def main():
@@ -378,22 +431,72 @@ def main():
 
     try:
         app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+        # Register handlers
         app.add_handler(CommandHandler("start", start_handler))
         app.add_handler(CommandHandler("stock", handle_stock))
         app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
         app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_cosmetic"))
 
-        # job_queue
-        app.job_queue.run_repeating(monitor_job, interval=10, first=5)
-        app.job_queue.run_repeating(sender_job, interval=1, first=7)
+        # try to ensure job_queue exists (on some PTB installs app.job_queue Может быть None until initialize)
+        try:
+            if app.job_queue is None:
+                logger.info("app.job_queue is None — пытаемся вызвать initialize() чтобы создать job_queue")
+                loop = asyncio.get_event_loop()
+                if not loop.is_running():
+                    loop.run_until_complete(app.initialize())
+                else:
+                    # если loop уже запущен - инициализируем синхронно через run_until_complete небезопасно,
+                    # но такие ситуации редки для стандартного запуска — логируем
+                    logger.warning("Event loop уже запущен — пропускаем явную инициализацию")
+        except Exception as e:
+            logger.exception("Не удалось инициализировать application для job_queue: %s", e)
 
+        # теперь job_queue должен быть создан
+        if getattr(app, 'job_queue', None) is not None:
+            try:
+                app.job_queue.run_repeating(monitor_job, interval=10, first=5)
+                app.job_queue.run_repeating(sender_job, interval=1, first=7)
+            except Exception as e:
+                logger.exception("Ошибка при создании задач в job_queue: %s", e)
+        else:
+            # fallback: если по какой-то причине job_queue всё ещё None, запускаем наши фоновые циклы через app.create_task
+            logger.warning("job_queue отсутствует — запускаем фоновые корутины вручную")
+            # сохраняем bot для sender_job fallback
+            globals()['APP_BOT'] = None
+            # стартуем приложение и создаём задачи внутри контекста приложения
+            async def _start_background_and_run():
+                await app.initialize()
+                # app.bot станет доступен после initialize/start
+                globals()['APP_BOT'] = app.bot
+                # создаём фоновые задачи
+                app.create_task(_background_monitor_loop(app))
+                app.create_task(_background_sender_loop(app))
+                # запускаем polling (это заблокирует до остановки)
+                await app.start()
+                await app.updater.start_polling()
+
+            # запускаем синхронно
+            loop = asyncio.get_event_loop()
+            if not loop.is_running():
+                loop.run_until_complete(_start_background_and_run())
+                # после завершения (обычно при остановке) — корректный выход
+                logger.info("_start_background_and_run завершился")
+                return
+            else:
+                logger.error("Не умеем корректно стартовать background tasks если event loop уже запущен")
+
+        # если мы здесь — job_queue создан и расписания поставлены; запустим обычный polling
         logger.info("Запуск polling в главном потоке...")
+        # сохраняем bot в глобальную переменную на случай fallback'ов
+        globals()['APP_BOT'] = app.bot
         app.run_polling()  # <-- запускается в main thread, signal handlers будут работать
         logger.info("app.run_polling() завершился (обычно при stop).")
     except Exception as e:
         logger.exception("Ошибка при run_polling: %s", e)
     finally:
         remove_lock()
+
 
 if __name__ == "__main__":
     main()
