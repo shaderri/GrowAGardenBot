@@ -1,41 +1,52 @@
-import types, sys
-# Monkey-patch imghdr stub for Python 3.13 compatibility
-if 'imghdr' not in sys.modules:
-    mod = types.ModuleType('imghdr')
-    mod.what = lambda *args, **kwargs: None
-    sys.modules['imghdr'] = mod
-
 import os
-import asyncio
+import sys
+import signal
 import logging
-import time
+import threading
 from datetime import datetime
-from dotenv import load_dotenv
-import requests
 from zoneinfo import ZoneInfo
+from typing import Any, Dict, List, Tuple
+
+import requests
+from flask import Flask
+from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    ContextTypes
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
 )
-from flask import Flask
-import threading
 
-# Load environment variables
+# ====== Настройка логов ======
+logging.basicConfig(
+    format="%(asctime)s %(levelname)s:%(name)s: %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger("growagarden-bot")
+
+# ====== Переменные окружения ======
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
+CHANNEL_ID_ENV = os.getenv("CHANNEL_ID")
 KEEPALIVE_PORT = int(os.getenv("PORT", 10000))
 JSTUDIO_KEY = os.getenv("JSTUDIO_KEY")
 
-# Flask app to keep bot alive
-flask_app = Flask(__name__)
-@flask_app.route('/')
-def home():
-    return 'Bot is running', 200
+def parse_channel_id(val: str):
+    if val is None:
+        return None
+    s = val.strip()
+    if s.startswith("@"):
+        return s
+    try:
+        return int(s)
+    except Exception:
+        return s
 
-def run_flask():
-    flask_app.run(host="0.0.0.0", port=KEEPALIVE_PORT)
+CHANNEL_ID = parse_channel_id(CHANNEL_ID_ENV)
+
+# ====== Конфигурация API и карты (как у тебя) ======
+STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
 
 # Emoji mappings
 CATEGORY_EMOJI = {
@@ -110,184 +121,279 @@ PRICE_MAP = {
     "romanesco":  88_000_000,
 }
 
-# APIs
-STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
-WEATHER_API = "https://api.joshlei.com/v2/growagarden/weather"
+# ====== Flask keepalive ======
+flask_app = Flask(__name__)
 
-# Fetchers
-def fetch_all_stock():
+@flask_app.route("/")
+def home():
+    return "Bot is running", 200
+
+# ====== Lock (PID file) ======
+LOCK_FILE = "/tmp/growagarden_bot.lock"
+
+def is_pid_running(pid: int) -> bool:
     try:
-        r = requests.get(
-            STOCK_API,
-            headers={"jstudio-key": JSTUDIO_KEY},
-            timeout=10
-        )
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        logging.error(f"Stock fetch error: {e}")
-        return {}
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except Exception:
+        return False
+    return True
 
+def acquire_lock_or_exit():
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE, "r") as f:
+                data = f.read().strip()
+                pid = int(data) if data else None
+        except Exception:
+            pid = None
 
-def fetch_weather():
+        if pid and is_pid_running(pid):
+            logger.warning("Lock file %s exists and PID %s is running -> второй экземпляр не будет запущен.", LOCK_FILE, pid)
+            sys.exit(0)
+        else:
+            logger.info("Lock file %s existed but PID not running -> удаляем stale lock.", LOCK_FILE)
+            try:
+                os.remove(LOCK_FILE)
+            except Exception:
+                pass
+
     try:
-        r = requests.get(
-            WEATHER_API,
-            headers={"jstudio-key": JSTUDIO_KEY},
-            timeout=10
-        )
-        r.raise_for_status()
-        return r.json().get("weather", [])
+        with open(LOCK_FILE, "w") as f:
+            f.write(str(os.getpid()))
+        logger.info("Создан lock с PID %s", os.getpid())
     except Exception as e:
-        logging.error(f"Weather fetch error: {e}")
-        return []
+        logger.exception("Не удалось создать lock file: %s", e)
+        sys.exit(1)
 
-# Formatters
+def remove_lock():
+    try:
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
+            logger.info("Lock %s удалён", LOCK_FILE)
+    except Exception as e:
+        logger.exception("Ошибка при удалении lock: %s", e)
+
+# ====== Fetch (sync -> thread) ======
+def _sync_fetch_stock_once() -> Dict[str, Any]:
+    headers = {"jstudio-key": JSTUDIO_KEY} if JSTUDIO_KEY else {}
+    resp = requests.get(STOCK_API, headers=headers, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+def _sync_fetch_stock_with_retries(retries: int = 2) -> Dict[str, Any]:
+    last_exc = None
+    for i in range(retries + 1):
+        try:
+            return _sync_fetch_stock_once()
+        except Exception as e:
+            last_exc = e
+            logger.warning("fetch attempt %d failed: %s", i+1, e)
+    logger.exception("All fetch attempts failed: %s", last_exc)
+    return {}
+
+async def fetch_all_stock() -> Dict[str, Any]:
+    import asyncio
+    return await asyncio.to_thread(_sync_fetch_stock_with_retries)
+
+# ====== Форматирование ======
 def format_block(key: str, items: list) -> str:
     if not items:
         return ""
-    emoji = CATEGORY_EMOJI.get(key.replace("_stock", ""), "•")
+    emoji = CATEGORY_EMOJI.get(key, "•")
     title = key.replace("_stock", "").capitalize()
-    lines = [f"━ {emoji} *{title}* ━"]
+    lines = [f"━ {emoji} <b>{title}</b> ━"]
     for it in items:
         em = ITEM_EMOJI.get(it.get("item_id"), "•")
-        lines.append(f"   {em} {it.get('display_name')}: x{it.get('quantity',0)}")
+        display = it.get("display_name") or it.get("item_id") or "Unknown"
+        qty = it.get("quantity", 0)
+        lines.append(f"   {em} {display}: x{qty}")
     return "\n".join(lines) + "\n\n"
 
-def format_weather_block(weather_list: list) -> str:
-    active = next((w for w in weather_list if w.get("active")), None)
-    if not active:
-        return "━ ☁️ *Погода* ━\nНет активных погодных событий"
-    emoji = CATEGORY_EMOJI["weather"]
-    end_ts = active.get("end_duration_unix", 0)
-    ends = datetime.fromtimestamp(end_ts, tz=ZoneInfo("Europe/Moscow")) \
-           .strftime("%H:%M:%S MSK") if end_ts else "--"
-    return (f"━ {emoji} *Погода* ━\n"
-            f"*Текущая:* {active.get('weather_name')}\n"
-            f"*Заканчивается в:* {ends}\n"
-            f"*Длительность:* {active.get('duration',0)} сек")
+# ====== Очередь и состояние ======
+messages_queue: List[Tuple[str, int, str]] = []
+recently_sent: Dict[str, int] = {}
+last_qty: Dict[str, int] = {}
+last_in_stock: Dict[str, bool] = {}
+import asyncio
+monitor_lock = asyncio.Lock()
 
-# Handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ====== Handlers ======
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [
         [InlineKeyboardButton("📦 Стоки", callback_data="show_stock")],
         [InlineKeyboardButton("💄 Косметика", callback_data="show_cosmetic")],
-        [InlineKeyboardButton("☁️ Погода", callback_data="show_weather")]
     ]
-    await update.message.reply_text("Привет! Выбери действие:", 
-                                    reply_markup=InlineKeyboardMarkup(kb))
+    try:
+        await update.message.reply_text("Бот запущен. Используй /stock для ручного запроса.", reply_markup=InlineKeyboardMarkup(kb))
+    except Exception:
+        pass
 
 async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    last = context.user_data.get("last_stock", 0)
-    if time.time() - last < 10:
-        await update.callback_query.answer("⏳ Подожди немного", show_alert=True)
-        return
-    context.user_data["last_stock"] = time.time()
     tgt = update.callback_query.message if update.callback_query else update.message
     if update.callback_query:
         await update.callback_query.answer()
-    data = fetch_all_stock()
+    data = await fetch_all_stock()
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
-    text = f"*🕒 {now}*\n\n"
-    for sec in ["seed_stock","gear_stock","egg_stock"]:
+    text = f"🕒 <b>{now}</b>\n\n"
+    for sec in ["seed_stock", "gear_stock", "egg_stock", "cosmetic_stock"]:
         text += format_block(sec, data.get(sec, []))
-    await tgt.reply_markdown(text)
+    await tgt.reply_text(text, parse_mode="HTML")
 
-async def handle_cosmetic(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    last = context.user_data.get("last_cosmetic", 0)
-    if time.time() - last < 10:
-        await update.callback_query.answer("⏳ Подожди немного", show_alert=True)
+# ====== Send with fallback ======
+async def send_with_retries_and_fallback(bot, chat_id, text_html: str, attempts: int = 3):
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        try:
+            await bot.send_message(chat_id=chat_id, text=text_html, parse_mode="HTML")
+            return True
+        except Exception as e:
+            last_exc = e
+            logger.warning("send attempt %d failed: %s", attempt, e)
+            if attempt == attempts:
+                try:
+                    await bot.send_message(chat_id=chat_id, text=text_html)
+                    return True
+                except Exception as e2:
+                    logger.exception("Final fallback send also failed: %s", e2)
+                    return False
+            await asyncio.sleep(0.5 * attempt)
+    logger.exception("All send attempts failed, last error: %s", last_exc)
+    return False
+
+# ====== monitor_job ======
+async def monitor_job(context: ContextTypes.DEFAULT_TYPE):
+    if monitor_lock.locked():
+        logger.info("monitor_job пропущен: предыдущий ещё выполняется")
         return
-    context.user_data["last_cosmetic"] = time.time()
-    tgt = update.callback_query.message if update.callback_query else update.message
-    if update.callback_query:
-        await update.callback_query.answer()
-    data = fetch_all_stock()
-    now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
-    text = f"*🕒 {now}*\n\n" + format_block("cosmetic_stock", 
-                                           data.get("cosmetic_stock", []))
-    await tgt.reply_markdown(text)
 
-async def handle_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    last = context.user_data.get("last_weather", 0)
-    if time.time() - last < 10:
-        await update.callback_query.answer("⏳ Подожди немного", show_alert=True)
+    async with monitor_lock:
+        try:
+            data = await fetch_all_stock()
+            if not data:
+                logger.debug("fetch_all_stock вернул пусто — пропускаем")
+                return
+
+            now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
+            new_messages: List[Tuple[str, int, str]] = []
+            local_qty_updates: Dict[str, int] = {}
+            local_instock_updates: Dict[str, bool] = {}
+
+            for sec in ["seed_stock", "gear_stock", "egg_stock", "cosmetic_stock"]:
+                for it in data.get(sec, []):
+                    iid = it.get("item_id")
+                    if iid is None:
+                        continue
+                    try:
+                        qty = int(it.get("quantity", 0))
+                    except Exception:
+                        qty = 0
+                    prev_qty = last_qty.get(iid, 0)
+                    was_in = last_in_stock.get(iid, False)
+                    now_in = qty > 0
+
+                    if iid in NOTIFY_ITEMS and ((now_in and not was_in) or (qty > prev_qty)):
+                        name_ru = ITEM_NAME_RU.get(iid, it.get('display_name') or iid)
+                        emoji = ITEM_EMOJI.get(iid, "")
+                        price = PRICE_MAP.get(iid, 0)
+                        price_str = f"{price:,}" if isinstance(price, int) else str(price)
+                        text_html = (
+                            f"<b>{emoji} {name_ru}: x{qty} в стоке!</b>\n"
+                            f"💰 Цена — {price_str}¢\n"
+                            f"🕒 {now}\n\n@GroowAGarden"
+                        )
+                        last_sent_qty = recently_sent.get(iid)
+                        if last_sent_qty is not None and last_sent_qty == qty:
+                            logger.info("Дубликат по количеству для %s (qty=%s) — пропускаем enqueue", iid, qty)
+                        else:
+                            new_messages.append((iid, qty, text_html))
+                            logger.info("Enqueue: %s qty=%s (prev=%s, was_in=%s->now_in=%s)", iid, qty, prev_qty, was_in, now_in)
+
+                    local_qty_updates[iid] = qty
+                    local_instock_updates[iid] = now_in
+
+            last_qty.update(local_qty_updates)
+            last_in_stock.update(local_instock_updates)
+
+            if new_messages:
+                before = len(messages_queue)
+                messages_queue.extend(new_messages)
+                logger.info("Добавлено %d сообщений в очередь (до=%d, после=%d)", len(new_messages), before, len(messages_queue))
+        except Exception as e:
+            logger.exception("Ошибка в monitor_job: %s", e)
+
+# ====== sender_job ======
+async def sender_job(context: ContextTypes.DEFAULT_TYPE):
+    if not messages_queue:
         return
-    context.user_data["last_weather"] = time.time()
-    tgt = update.callback_query.message if update.callback_query else update.message
-    if update.callback_query:
-        await update.callback_query.answer()
-    weather = fetch_weather()
-    await tgt.reply_markdown(format_weather_block(weather))
+    MAX_PER_PASS = 20
+    to_send = []
+    while messages_queue and len(to_send) < MAX_PER_PASS:
+        to_send.append(messages_queue.pop(0))
 
-# Scheduling helpers
-def compute_delay():
-    now = datetime.now(tz=ZoneInfo("Europe/Moscow"))
-    next_min = ((now.minute // 5) + 1) * 5
-    hour = now.hour + (next_min // 60)
-    minute = next_min % 60
-    run = now.replace(hour=hour%24, minute=minute, second=6, microsecond=0)
-    delta = (run - now).total_seconds()
-    return delta if delta>0 else delta + 86400
+    logger.info("Sender job: отправляем %d сообщений (оставшихся в очереди: %d)", len(to_send), len(messages_queue))
+    for iid, qty, text_html in to_send:
+        try:
+            ok = await send_with_retries_and_fallback(context.bot, CHANNEL_ID, text_html, attempts=3)
+            if ok:
+                recently_sent[iid] = qty
+                logger.info("Sent: %s qty=%s", iid, qty)
+            else:
+                messages_queue.append((iid, qty, text_html))
+                logger.warning("Не удалось отправить %s — возвращаем в очередь (длина сейчас %d)", iid, len(messages_queue))
+            await asyncio.sleep(0.25)
+        except Exception as e:
+            logger.exception("Ошибка при отправке %s: %s — возвращаем в очередь", iid, e)
+            messages_queue.append((iid, qty, text_html))
 
-def compute_egg_delay():
-    now = datetime.now(tz=ZoneInfo("Europe/Moscow"))
-    if now.minute < 30:
-        minute, hour = 30, now.hour
-    else:
-        minute, hour = 0, (now.hour+1)%24
-    run = now.replace(hour=hour, minute=minute, second=6, microsecond=0)
-    delta = (run - now).total_seconds()
-    return delta if delta>0 else delta + 86400
+# ====== Обработка сигналов ======
+def handle_termination(signum, frame):
+    logger.info("Получен сигнал %s — завершаем процесс.", signum)
+    remove_lock()
+    os._exit(0)
 
-# Notification tasks
-async def monitor_stock(app):
-    while True:
-        await asyncio.sleep(compute_delay())
-        data = fetch_all_stock()
-        now = datetime.now(tz=ZoneInfo("Europe/Moscow")) \
-              .strftime("%H:%M:%S MSK")
-        for sec in ["seed_stock","gear_stock","cosmetic_stock"]:
-            for it in data.get(sec, []):
-                iid, qty = it.get("item_id"), it.get("quantity",0)
-                if iid in NOTIFY_ITEMS and qty>0:
-                    msg = (f"*{ITEM_EMOJI[iid]} {ITEM_NAME_RU.get(iid,it['display_name'])}: x{qty} в стоке!*\n"
-                           f"💰 Цена — {PRICE_MAP[iid]:,}¢\n"
-                           f"🕒 {now}\n\n*@GroowAGarden*")
-                    await app.bot.send_message(chat_id=CHANNEL_ID, 
-                                               text=msg, parse_mode="Markdown")
+signal.signal(signal.SIGINT, handle_termination)
+signal.signal(signal.SIGTERM, handle_termination)
 
-async def monitor_egg(app):
-    while True:
-        await asyncio.sleep(compute_egg_delay())
-        data = fetch_all_stock()
-        now = datetime.now(tz=ZoneInfo("Europe/Moscow")) \
-              .strftime("%H:%M:%S MSK")
-        for it in data.get("egg_stock", []):
-            iid, qty = it.get("item_id"), it.get("quantity",0)
-            if iid in ["paradise_egg","bug_egg"] and qty>0:
-                msg = (f"*{ITEM_EMOJI[iid]} {ITEM_NAME_RU.get(iid,it['display_name'])}: x{qty} в стоке!*\n"
-                       f"💰 Цена — {PRICE_MAP[iid]:,}¢\n"
-                       f"🕒 {now}\n\n*@GroowAGarden*")
-                await app.bot.send_message(chat_id=CHANNEL_ID, 
-                                           text=msg, parse_mode="Markdown")
+# ====== Main: acquire lock, стартуем Flask в thread, запускаем polling в main thread ======
+def main():
+    acquire_lock_or_exit()
 
-# Application setup
-async def post_init(app):
-    app.create_task(monitor_stock(app))
-    app.create_task(monitor_egg(app))
+    # Запускаем Flask в фоновом потоке (use_reloader=False важно)
+    flask_thread = threading.Thread(
+        target=lambda: flask_app.run(host="0.0.0.0", port=KEEPALIVE_PORT, use_reloader=False),
+        daemon=True,
+    )
+    flask_thread.start()
+    logger.info("Flask thread started (daemon) on port %s", KEEPALIVE_PORT)
 
-app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("stock", handle_stock))
-app.add_handler(CommandHandler("cosmetic", handle_cosmetic))
-app.add_handler(CommandHandler("weather", handle_weather))
-app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
-app.add_handler(CallbackQueryHandler(handle_cosmetic, pattern="show_cosmetic"))
-app.add_handler(CallbackQueryHandler(handle_weather, pattern="show_weather"))
+    # Теперь запускаем polling в главном потоке — это важно для signal handlers
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN не задан — выходим.")
+        remove_lock()
+        return
+
+    try:
+        app = ApplicationBuilder().token(BOT_TOKEN).build()
+        app.add_handler(CommandHandler("start", start_handler))
+        app.add_handler(CommandHandler("stock", handle_stock))
+        app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
+        app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_cosmetic"))
+
+        # job_queue
+        app.job_queue.run_repeating(monitor_job, interval=10, first=5)
+        app.job_queue.run_repeating(sender_job, interval=1, first=7)
+
+        logger.info("Запуск polling в главном потоке...")
+        app.run_polling()  # <-- запускается в main thread, signal handlers будут работать
+        logger.info("app.run_polling() завершился (обычно при stop).")
+    except Exception as e:
+        logger.exception("Ошибка при run_polling: %s", e)
+    finally:
+        remove_lock()
 
 if __name__ == "__main__":
-    t = threading.Thread(target=run_flask)
-    t.daemon = True
-    t.start()
-    app.run_polling()
+    main()
