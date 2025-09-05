@@ -60,10 +60,6 @@ CATEGORY_EMOJI = {
 
 ITEM_EMOJI = {
     # ... (остальные эмодзи) ...
-    "grape": "🍇",
-    "mushroom": "🍄",
-    "pepper": "🌶️",
-    "cacao": "🍫",
     "beanstalk": "🫛",
     "ember_lily": "🌸",
     "sugar_apple": "🍏",
@@ -74,13 +70,11 @@ ITEM_EMOJI = {
     "levelup_lollipop": "🍭",
     "elder_strawberry": "🍓",
     "romanesco": "🥦",
-    "paradise_egg": "🐣",
     "bug_egg": "🐣",
 }
 
 # Переводы отслеживаемых предметов на русский
 ITEM_NAME_RU = {
-    "paradise_egg": "Райское яйцо",
     "bug_egg": "Яйцо Жука",
     "grape": "Виноград",
     "mushroom": "Грибы",
@@ -99,8 +93,7 @@ ITEM_NAME_RU = {
 }
 
 # Items to notify about
-NOTIFY_ITEMS = [
-    "grape", "mushroom", "pepper", "cacao",
+NOTIFY_ITEMS = [~
     "beanstalk", "ember_lily", "sugar_apple",
     "burning_bud", "giant_pinecone",
     "master_sprinkler", "grandmaster_sprinkler", "levelup_lollipop", "elder_strawberry", "romanesco"
