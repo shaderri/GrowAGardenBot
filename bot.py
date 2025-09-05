@@ -28,7 +28,6 @@ CATEGORY_EMOJI = {
     "seed_stock": "🌱",
     "gear_stock": "🧰",
     "egg_stock": "🥚",
-    "eventshop_stock": "🫛",  # новая категория
 }
 
 ITEM_EMOJI = {
@@ -52,20 +51,6 @@ ITEM_EMOJI = {
     "sign_crate": "📦", "medium_wood_flooring": "🪵", "market_cart": "🛒",
     "yellow_umbrella": "☂️", "hay_bale": "🌾", "brick_stack": "🧱",
     "torch": "🔥", "stone_lantern": "🏮", "brown_bench": "🪑", "red_cooler_chest": "📦", "log_bench": "🛋️", "light_on_ground": "💡", "small_circle_tile": "⚪", "beach_crate": "📦", "blue_cooler_chest": "🧊", "large_wood_flooring": "🪚", "medium_stone_table": "🪨", "wood_pile": "🪵", "medium_path_tile": "🛤️", "shovel_grave": "⛏️", "frog_fountain": "🐸", "small_stone_lantern": "🕯️", "small_wood_table": "🪑", "medium_circle_tile": "🔘", "small_path_tile": "🔹", "mini_tv": "📺", "rock_pile": "🗿", "brown_stone_pillar": "🧱", "red_cooler_chest": "🧊", "bookshelf": "📚", "brown_bench": "🪑", "log_bench": "🪵", "large_path_tile": "◼️", "axe_stump": "🪵", "shovel": "⛏️", "flat_canopy": "🏕️", "large_wood_table": "🪵", "small_wood_flooring": "🪵", "small_stone_pad": "◽️", "long_stone_table": "🪨",
-
-    # Event shop items
-    "zen_seed_pack": "🌱", "zen_egg": "🥚", "hot_spring": "♨️", "zen_sand": "🏖️", "zenflare": "✨",
-    "zen_crate": "📦", "soft_sunshine": "☀️", "koi": "🐟", "zen_gnome_crate": "🧙", "spiked_mango": "🥭", "pet_shard_tranquil": "💠", "tranquil_radar": "🔫", "sakura_bush": "🌸", "corrupt_radar": "🧿", "raiju": "⚡", "pet_shard_corrupted": "🧩",
-
-    # New Event items
-    "sprout_seed_pack": "🌱",
-    "sprout_egg": "🥚",
-    "mandrake_seed": "🧙‍♂️🌱",
-    "sprout_crate": "📦",
-    "silver_fertilizer": "⚪🌱",
-    "canary_melon_seed": "🍈",
-    "amberheart": "💛",
-    "spriggan": "🌿🧚",
 }
 
 WEATHER_EMOJI = {
@@ -82,7 +67,6 @@ TITLE_MAP = {
     "seed_stock": "*Seeds*",
     "gear_stock": "*Gear*",
     "egg_stock": "*Eggs*",
-    "eventshop_stock": "*Event*",
 }
 
 # Fetchers (с ключом в заголовке)
@@ -167,7 +151,7 @@ async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime('%d.%m.%Y %H:%M:%S MSK')
     text = f"*🕒 {now}*\n\n" + "".join(
         format_block(sec, data.get(sec, []))
-        for sec in ["seed_stock", "gear_stock", "egg_stock", "eventshop_stock"]
+        for sec in ["seed_stock", "gear_stock", "egg_stock"]
     )
     await tgt.reply_markdown(text)
 
