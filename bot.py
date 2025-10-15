@@ -384,7 +384,7 @@ async def add_autostock_command(update: Update, context: ContextTypes.DEFAULT_TY
         message = (
             f"✅ *ДОБАВЛЕНО В АВТОСТОК*\n\n"
             f"{info['emoji']} *{item_name}*\n"
-            f"Цена: {info['price']} ¢"
+            f"Цена: {info['price']} ₪"
         )
         await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
     else:
@@ -440,7 +440,7 @@ async def seeds_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Список всех семян"""
     message = "🌱 *ВСЕ СЕМЕНА*\n\n"
     for name, info in sorted(SEEDS_DATA.items()):
-        message += f"{info['emoji']} *{name}*\n_Цена: {info['price']} ¢ ({info['rarity']})_\n\n"
+        message += f"{info['emoji']} *{name}*\n_Цена: {info['price']} ₪ ({info['rarity']})_\n\n"
     
     await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
@@ -513,7 +513,7 @@ async def stock_check(application: Application):
                             f"🚨 *РЕДКИЙ ПРЕДМЕТ В СТОКЕ!* 🚨\n\n"
                             f"{info['emoji']} *{item_name}*\n"
                             f"📦 Количество: *x{current_count}*\n"
-                            f"💰 Цена: {info['price']} ¢\n"
+                            f"💰 Цена: {info['price']} ₪\n"
                             f"⚡ Редкость: {info['rarity']}\n\n"
                             f"🕒 {now.strftime('%H:%M:%S')} МСК"
                         )
@@ -543,7 +543,7 @@ async def stock_check(application: Application):
                             f"🔔 *АВТОСТОК - ПРЕДМЕТ ПОЯВИЛСЯ!*\n\n"
                             f"{info['emoji']} *{item_name}*\n"
                             f"📦 Количество: *x{count}*\n"
-                            f"💰 Цена: {info['price']} ¢\n"
+                            f"💰 Цена: {info['price']} ₪\n"
                             f"🕒 {now.strftime('%H:%M:%S')} МСК"
                         )
                         
