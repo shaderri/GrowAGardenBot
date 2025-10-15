@@ -1,495 +1,605 @@
-import os
-import sys
-import signal
-import logging
-import threading
-from datetime import datetime
-from zoneinfo import ZoneInfo
-from typing import Any, Dict, List, Tuple
-
-import requests
-from flask import Flask
-from dotenv import load_dotenv
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-)
-
 import asyncio
-import types
+import aiohttp
+import logging
+import os
+import json
+from datetime import datetime, timedelta
+from typing import Dict, Optional, List, Set
+from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+from telegram.constants import ParseMode
+from dotenv import load_dotenv
+import pytz
 
-# ====== Настройка логов ======
-logging.basicConfig(
-    format="%(asctime)s %(levelname)s:%(name)s: %(message)s",
-    level=logging.INFO,
-)
-logger = logging.getLogger("growagarden-bot")
-
-# ====== Переменные окружения ======
 load_dotenv()
+
+# ========== КОНФИГУРАЦИЯ ==========
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID_ENV = os.getenv("CHANNEL_ID")
-KEEPALIVE_PORT = int(os.getenv("PORT", 10000))
-JSTUDIO_KEY = os.getenv("JSTUDIO_KEY")
+CHANNEL_ID = os.getenv("CHANNEL_ID", "@GroowAGarden")
+SUPABASE_URL_BASE = os.getenv("SUPABASE_URL", "https://your-project.supabase.co/rest/v1")
+SUPABASE_API_KEY = os.getenv("SUPABASE_KEY", "your-key")
 
+AUTOSTOCKS_URL = f"{SUPABASE_URL_BASE}/user_autostocks_gag"
 
-def parse_channel_id(val: str):
-    if val is None:
-        return None
-    s = val.strip()
-    if s.startswith("@"):
-        return s
-    try:
-        return int(s)
-    except Exception:
-        return s
+# API игры
+GAG_API_BASE = "https://gagapi.onrender.com"
+SEEDS_API = f"{GAG_API_BASE}/seeds"
+GEAR_API = f"{GAG_API_BASE}/gear"
+COSMETICS_API = f"{GAG_API_BASE}/cosmetics"
 
+CHECK_INTERVAL_MINUTES = 5
+AUTOSTOCK_CACHE_TTL = 60
 
-CHANNEL_ID = parse_channel_id(CHANNEL_ID_ENV)
+# Два самых редких семена для уведомлений в канал
+RAREST_SEEDS = ["Crimson Thorn", "Great Pumpkin"]
 
-# ====== Конфигурация API и карты (как у тебя) ======
-STOCK_API = "https://api.joshlei.com/v2/growagarden/stock"
-
-# Emoji mappings
-CATEGORY_EMOJI = {
-    "seeds": "🌱", "gear": "🧰", "egg": "🥚", "cosmetic": "💄", "weather": "☁️"
+# ========== ДАННЫЕ ПРЕДМЕТОВ ==========
+SEEDS_DATA = {
+    "Carrot": {"emoji": "🥕", "price": "10", "rarity": "1 in 1"},
+    "Strawberry": {"emoji": "🍓", "price": "50", "rarity": "1 in 1"},
+    "Blueberry": {"emoji": "🫐", "price": "400", "rarity": "1 in 1"},
+    "Orange Tulip": {"emoji": "🧡", "price": "600", "rarity": "1 in 3"},
+    "Tomato": {"emoji": "🍅", "price": "800", "rarity": "1 in 1"},
+    "Corn": {"emoji": "🌽", "price": "1,300", "rarity": "1 in 6"},
+    "Daffodil": {"emoji": "🌼", "price": "1,000", "rarity": "1 in 7"},
+    "Watermelon": {"emoji": "🍉", "price": "2,500", "rarity": "1 in 8"},
+    "Pumpkin": {"emoji": "🎃", "price": "3,000", "rarity": "1 in 10"},
+    "Apple": {"emoji": "🍎", "price": "3,250", "rarity": "1 in 14"},
+    "Bamboo": {"emoji": "🎋", "price": "4,000", "rarity": "1 in 5"},
+    "Coconut": {"emoji": "🥥", "price": "6,000", "rarity": "1 in 20"},
+    "Cactus": {"emoji": "🌵", "price": "15,000", "rarity": "1 in 30"},
+    "Dragon Fruit": {"emoji": "🐉", "price": "50,000", "rarity": "1 in 50"},
+    "Mango": {"emoji": "🥭", "price": "100,000", "rarity": "1 in 80"},
+    "Grape": {"emoji": "🍇", "price": "850,000", "rarity": "1 in 100"},
+    "Mushroom": {"emoji": "🍄", "price": "150,000", "rarity": "1 in 120"},
+    "Pepper": {"emoji": "🌶️", "price": "1,000,000", "rarity": "1 in 140"},
+    "Cacao": {"emoji": "🍫", "price": "2,500,000", "rarity": "1 in 160"},
+    "Beanstalk": {"emoji": "🪜", "price": "10,000,000", "rarity": "1 in 210"},
+    "Ember Lily": {"emoji": "🔥", "price": "15,000,000", "rarity": "1 in 240"},
+    "Sugar Apple": {"emoji": "🍎", "price": "25,000,000", "rarity": "1 in 290"},
+    "Burning Bud": {"emoji": "🔥", "price": "40,000,000", "rarity": "1 in 340"},
+    "Giant Pinecone": {"emoji": "🌲", "price": "55,000,000", "rarity": "1 in 380"},
+    "Elder Strawberry": {"emoji": "🍓", "price": "70,000,000", "rarity": "1 in 400"},
+    "Romanesco": {"emoji": "🥦", "price": "88,000,000", "rarity": "1 in 440"},
+    "Crimson Thorn": {"emoji": "🌹", "price": "10,000,000,000", "rarity": "1 in 777"},
+    "Great Pumpkin": {"emoji": "🎃", "price": "15,000,000,000", "rarity": "LEGENDARY"},
 }
 
-ITEM_EMOJI = {
-    # ... (остальные эмодзи) ...
-    "beanstalk": "🫛",
-    "ember_lily": "🌸",
-    "sugar_apple": "🍏",
-    "burning_bud": "🔥",
-    "giant_pinecone": "🌰",
-    "master_sprinkler": "🌧️",
-    "grandmaster_sprinkler": "💦",
-    "levelup_lollipop": "🍭",
-    "elder_strawberry": "🍓",
-    "romanesco": "🥦",
-    "bug_egg": "🐣",
+GEAR_DATA = {
+    "Watering Can": {"emoji": "💧", "price": "50,000", "stock": 39},
+    "Trowel": {"emoji": "🔨", "price": "100,000", "stock": 49},
+    "Trading Ticket": {"emoji": "🎫", "price": "100,000", "stock": 19},
+    "Recall Wrench": {"emoji": "🔧", "price": "150,000", "stock": 59},
+    "Basic Sprinkler": {"emoji": "💦", "price": "25,000", "stock": 0},
+    "Advanced Sprinkler": {"emoji": "💦", "price": "50,000", "stock": 99},
+    "Medium Treat": {"emoji": "🍖", "price": "4,000,000", "stock": 199},
+    "Medium Toy": {"emoji": "🎮", "price": "4,000,000", "stock": 189},
+    "Godly Sprinkler": {"emoji": "✨", "price": "120,000", "stock": 149},
+    "Magnifying Glass": {"emoji": "🔍", "price": "10,000,000", "stock": 99},
+    "Master Sprinkler": {"emoji": "👑", "price": "10,000,000", "stock": 199},
+    "Cleaning Spray": {"emoji": "🧼", "price": "15,000,000", "stock": 139},
+    "Favorite Tool": {"emoji": "⭐", "price": "20,000,000", "stock": 119},
+    "Harvest Tool": {"emoji": "✂️", "price": "30,000,000", "stock": 149},
+    "Friendship Pot": {"emoji": "🪴", "price": "15,000,000", "stock": 39},
+    "Level Up Lollipop": {"emoji": "🍭", "price": "10,000,000,000", "stock": 79},
+    "Grandmaster Sprinkler": {"emoji": "🏆", "price": "1,000,000,000", "stock": 279},
 }
 
-# Переводы отслеживаемых предметов на русский
-ITEM_NAME_RU = {
-    "bug_egg": "Яйцо Жука",
-    "grape": "Виноград",
-    "mushroom": "Грибы",
-    "pepper": "Перец",
-    "cacao": "Какао",
-    "beanstalk": "Бобовый стебель",
-    "ember_lily": "Эмбер лили",
-    "sugar_apple": "Сахарное яблоко",
-    "burning_bud": "Горящий бутон",
-    "giant_pinecone": "Гигантская шишка",
-    "master_sprinkler": "Мастер спринклер",
-    "grandmaster_sprinkler": "Грандмастер спринклер",
-    "levelup_lollipop": "Леденец уровня",
-    "elder_strawberry": "Бузинная клубника",
-    "romanesco": "Романеско",
+EGGS_DATA = {
+    "Common Egg": {"emoji": "🥚", "price": "50,000"},
+    "Uncommon Egg": {"emoji": "🟡", "price": "150,000"},
+    "Rare Egg": {"emoji": "🔵", "price": "600,000"},
+    "Legendary Egg": {"emoji": "💜", "price": "3,000,000"},
+    "Mythical Egg": {"emoji": "🌈", "price": "8,000,000"},
+    "Bug Egg": {"emoji": "🐛", "price": "50,000,000"},
+    "Jungle Egg": {"emoji": "🦜", "price": "60,000,000"},
 }
 
-# Items to notify about
-NOTIFY_ITEMS = [~
-    "beanstalk", "ember_lily", "sugar_apple",
-    "burning_bud", "giant_pinecone",
-    "master_sprinkler", "grandmaster_sprinkler", "levelup_lollipop", "elder_strawberry", "romanesco"
-]
+# ========== КЭШИРОВАНИЕ ==========
+user_autostocks_cache: Dict[int, Set[str]] = {}
+user_autostocks_time: Dict[int, datetime] = {}
+last_stock_state: Dict[str, int] = {}
 
-# Prices for notifications (in ¢)
-PRICE_MAP = {
-    "paradise_egg": 50_000_000,
-    "bug_egg": 50_000_000,
-    "grape": 850_000,
-    "mushroom": 150_000,
-    "pepper": 1_000_000,
-    "cacao": 2_500_000,
-    "beanstalk": 10_000_000,
-    "ember_lily": 15_000_000,
-    "sugar_apple": 25_000_000,
-    "burning_bud": 40_000_000,
-    "giant_pinecone": 55_000_000,
-    "master_sprinkler": 10_000_000,
-    "grandmaster_sprinkler": 1_000_000_000,
-    "levelup_lollipop": 10_000_000_000,
-    "elder_strawberry": 70_000_000,
-    "romanesco":  88_000_000,
-}
+# ========== ЛОГИРОВАНИЕ ==========
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-# ====== Flask keepalive ======
-flask_app = Flask(__name__)
+# ========== УТИЛИТЫ ==========
+def get_moscow_time() -> datetime:
+    """Получить текущее московское время"""
+    return datetime.now(pytz.timezone('Europe/Moscow'))
 
-@flask_app.route("/")
-def home():
-    return "Bot is running", 200
-
-# ====== Lock (PID file) ======
-LOCK_FILE = "/tmp/growagarden_bot.lock"
-
-
-def is_pid_running(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except Exception:
-        return False
-    return True
-
-
-def acquire_lock_or_exit():
-    if os.path.exists(LOCK_FILE):
+class SupabaseDB:
+    """Работа с Supabase для автостоков"""
+    
+    def __init__(self):
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.headers = {
+            "apikey": SUPABASE_API_KEY,
+            "Authorization": f"Bearer {SUPABASE_API_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        }
+    
+    async def init_session(self):
+        if not self.session or self.session.closed:
+            self.session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=20, connect=10, sock_read=10)
+            )
+    
+    async def close_session(self):
+        if self.session and not self.session.closed:
+            await self.session.close()
+    
+    async def load_user_autostocks(self, user_id: int, use_cache: bool = True) -> Set[str]:
+        """Загрузка автостоков с кэшированием (TTL 60 сек)"""
+        if use_cache and user_id in user_autostocks_cache:
+            cache_time = user_autostocks_time.get(user_id)
+            if cache_time:
+                now = get_moscow_time()
+                if (now - cache_time).total_seconds() < AUTOSTOCK_CACHE_TTL:
+                    return user_autostocks_cache[user_id].copy()
+        
         try:
-            with open(LOCK_FILE, "r") as f:
-                data = f.read().strip()
-                pid = int(data) if data else None
-        except Exception:
-            pid = None
-
-        if pid and is_pid_running(pid):
-            logger.warning("Lock file %s exists and PID %s is running -> второй экземпляр не будет запущен.", LOCK_FILE, pid)
-            sys.exit(0)
-        else:
-            logger.info("Lock file %s existed but PID not running -> удаляем stale lock.", LOCK_FILE)
-            try:
-                os.remove(LOCK_FILE)
-            except Exception:
-                pass
-
-    try:
-        with open(LOCK_FILE, "w") as f:
-            f.write(str(os.getpid()))
-        logger.info("Создан lock с PID %s", os.getpid())
-    except Exception as e:
-        logger.exception("Не удалось создать lock file: %s", e)
-        sys.exit(1)
-
-
-def remove_lock():
-    try:
-        if os.path.exists(LOCK_FILE):
-            os.remove(LOCK_FILE)
-            logger.info("Lock %s удалён", LOCK_FILE)
-    except Exception as e:
-        logger.exception("Ошибка при удалении lock: %s", e)
-
-# ====== Fetch (sync -> thread) ======
-def _sync_fetch_stock_once() -> Dict[str, Any]:
-    headers = {"jstudio-key": JSTUDIO_KEY} if JSTUDIO_KEY else {}
-    resp = requests.get(STOCK_API, headers=headers, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def _sync_fetch_stock_with_retries(retries: int = 2) -> Dict[str, Any]:
-    last_exc = None
-    for i in range(retries + 1):
-        try:
-            return _sync_fetch_stock_once()
+            await self.init_session()
+            params = {"user_id": f"eq.{user_id}", "select": "item_name"}
+            
+            async with self.session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    items_set = {item['item_name'] for item in data}
+                    
+                    user_autostocks_cache[user_id] = items_set
+                    user_autostocks_time[user_id] = get_moscow_time()
+                    
+                    return items_set
+                return set()
         except Exception as e:
-            last_exc = e
-            logger.warning("fetch attempt %d failed: %s", i+1, e)
-    logger.exception("All fetch attempts failed: %s", last_exc)
-    return {}
-
-
-async def fetch_all_stock() -> Dict[str, Any]:
-    return await asyncio.to_thread(_sync_fetch_stock_with_retries)
-
-# ====== Форматирование ======
-def format_block(key: str, items: list) -> str:
-    if not items:
-        return ""
-    emoji = CATEGORY_EMOJI.get(key, "•")
-    title = key.replace("_stock", "").capitalize()
-    lines = [f"━ {emoji} <b>{title}</b> ━"]
-    for it in items:
-        em = ITEM_EMOJI.get(it.get("item_id"), "•")
-        display = it.get("display_name") or it.get("item_id") or "Unknown"
-        qty = it.get("quantity", 0)
-        lines.append(f"   {em} {display}: x{qty}")
-    return "\n".join(lines) + "\n\n"
-
-# ====== Очередь и состояние ======
-messages_queue: List[Tuple[str, int, str]] = []
-recently_sent: Dict[str, int] = {}
-last_qty: Dict[str, int] = {}
-last_in_stock: Dict[str, bool] = {}
-monitor_lock = asyncio.Lock()
-
-# ====== Handlers ======
-async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb = [
-        [InlineKeyboardButton("📦 Стоки", callback_data="show_stock")],
-        [InlineKeyboardButton("💄 Косметика", callback_data="show_cosmetic")],
-    ]
-    try:
-        if update.message:
-            await update.message.reply_text("Бот запущен. Используй /stock для ручного запроса.", reply_markup=InlineKeyboardMarkup(kb))
-        else:
-            await update.effective_chat.send_message("Бот запущен. Используй /stock для ручного запроса.", reply_markup=InlineKeyboardMarkup(kb))
-    except Exception:
-        pass
-
-
-async def handle_stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tgt = update.callback_query.message if update.callback_query and update.callback_query.message else update.message
-    if update.callback_query:
-        await update.callback_query.answer()
-    data = await fetch_all_stock()
-    now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
-    text = f"🕒 <b>{now}</b>\n\n"
-    for sec in ["seed_stock", "gear_stock", "egg_stock", "cosmetic_stock"]:
-        text += format_block(sec, data.get(sec, []))
-    if tgt:
-        await tgt.reply_text(text, parse_mode="HTML")
-
-# ====== Send with fallback ======
-async def send_with_retries_and_fallback(bot, chat_id, text_html: str, attempts: int = 3):
-    last_exc = None
-    for attempt in range(1, attempts + 1):
+            logger.error(f"❌ Ошибка загрузки автостоков: {e}")
+            return set()
+    
+    async def save_user_autostock(self, user_id: int, item_name: str) -> bool:
+        """Сохранение автостока"""
+        if user_id not in user_autostocks_cache:
+            user_autostocks_cache[user_id] = set()
+        user_autostocks_cache[user_id].add(item_name)
+        user_autostocks_time[user_id] = get_moscow_time()
+        
         try:
-            await bot.send_message(chat_id=chat_id, text=text_html, parse_mode="HTML")
-            return True
+            await self.init_session()
+            data = {"user_id": user_id, "item_name": item_name}
+            
+            async with self.session.post(AUTOSTOCKS_URL, json=data, headers=self.headers, timeout=5) as response:
+                return response.status in [200, 201]
         except Exception as e:
-            last_exc = e
-            logger.warning("send attempt %d failed: %s", attempt, e)
-            if attempt == attempts:
-                try:
-                    await bot.send_message(chat_id=chat_id, text=text_html)
-                    return True
-                except Exception as e2:
-                    logger.exception("Final fallback send also failed: %s", e2)
-                    return False
-            await asyncio.sleep(0.5 * attempt)
-    logger.exception("All send attempts failed, last error: %s", last_exc)
-    return False
-
-# ====== monitor_job ======
-async def monitor_job(context: ContextTypes.DEFAULT_TYPE | None = None):
-    # context is optional because we may call this from custom loops
-    if monitor_lock.locked():
-        logger.info("monitor_job пропущен: предыдущий ещё выполняется")
-        return
-
-    async with monitor_lock:
+            logger.error(f"❌ Ошибка сохранения: {e}")
+            return False
+    
+    async def remove_user_autostock(self, user_id: int, item_name: str) -> bool:
+        """Удаление автостока"""
+        if user_id in user_autostocks_cache:
+            user_autostocks_cache[user_id].discard(item_name)
+            user_autostocks_time[user_id] = get_moscow_time()
+        
         try:
-            data = await fetch_all_stock()
-            if not data:
-                logger.debug("fetch_all_stock вернул пусто — пропускаем")
-                return
-
-            now = datetime.now(tz=ZoneInfo("Europe/Moscow")).strftime("%H:%M:%S MSK")
-            new_messages: List[Tuple[str, int, str]] = []
-            local_qty_updates: Dict[str, int] = {}
-            local_instock_updates: Dict[str, bool] = {}
-
-            for sec in ["seed_stock", "gear_stock", "egg_stock", "cosmetic_stock"]:
-                for it in data.get(sec, []):
-                    iid = it.get("item_id")
-                    if iid is None:
-                        continue
-                    try:
-                        qty = int(it.get("quantity", 0))
-                    except Exception:
-                        qty = 0
-                    prev_qty = last_qty.get(iid, 0)
-                    was_in = last_in_stock.get(iid, False)
-                    now_in = qty > 0
-
-                    if iid in NOTIFY_ITEMS and ((now_in and not was_in) or (qty > prev_qty)):
-                        name_ru = ITEM_NAME_RU.get(iid, it.get('display_name') or iid)
-                        emoji = ITEM_EMOJI.get(iid, "")
-                        price = PRICE_MAP.get(iid, 0)
-                        price_str = f"{price:,}" if isinstance(price, int) else str(price)
-                        text_html = (
-                            f"<b>{emoji} {name_ru}: x{qty} в стоке!</b>\n"
-                            f"💰 Цена — {price_str}¢\n"
-                            f"🕒 {now}\n\n@GroowAGarden"
-                        )
-                        last_sent_qty = recently_sent.get(iid)
-                        if last_sent_qty is not None and last_sent_qty == qty:
-                            logger.info("Дубликат по количеству для %s (qty=%s) — пропускаем enqueue", iid, qty)
-                        else:
-                            new_messages.append((iid, qty, text_html))
-                            logger.info("Enqueue: %s qty=%s (prev=%s, was_in=%s->now_in=%s)", iid, qty, prev_qty, was_in, now_in)
-
-                    local_qty_updates[iid] = qty
-                    local_instock_updates[iid] = now_in
-
-            last_qty.update(local_qty_updates)
-            last_in_stock.update(local_instock_updates)
-
-            if new_messages:
-                before = len(messages_queue)
-                messages_queue.extend(new_messages)
-                logger.info("Добавлено %d сообщений в очередь (до=%d, после=%d)", len(new_messages), before, len(messages_queue))
+            await self.init_session()
+            params = {"user_id": f"eq.{user_id}", "item_name": f"eq.{item_name}"}
+            
+            async with self.session.delete(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=5) as response:
+                return response.status in [200, 204]
         except Exception as e:
-            logger.exception("Ошибка в monitor_job: %s", e)
-
-
-# ====== sender_job ======
-async def sender_job(context: ContextTypes.DEFAULT_TYPE | None = None):
-    if not messages_queue:
-        return
-    MAX_PER_PASS = 20
-    to_send = []
-    while messages_queue and len(to_send) < MAX_PER_PASS:
-        to_send.append(messages_queue.pop(0))
-
-    logger.info("Sender job: отправляем %d сообщений (оставшихся в очереди: %d)", len(to_send), len(messages_queue))
-    for iid, qty, text_html in to_send:
+            logger.error(f"❌ Ошибка удаления: {e}")
+            return False
+    
+    async def get_users_tracking_item(self, item_name: str) -> List[int]:
+        """Получить пользователей, отслеживающих предмет"""
         try:
-            bot = None
-            if context is not None and hasattr(context, 'bot'):
-                bot = context.bot
-            else:
-                # fallback: try to use global Application bot if available
-                bot = globals().get('APP_BOT')
-
-            if bot is None:
-                # can't send right now, push back and abort
-                messages_queue.append((iid, qty, text_html))
-                logger.warning("Нет bot в sender_job — отложено отправление %s", iid)
-                return
-
-            ok = await send_with_retries_and_fallback(bot, CHANNEL_ID, text_html, attempts=3)
-            if ok:
-                recently_sent[iid] = qty
-                logger.info("Sent: %s qty=%s", iid, qty)
-            else:
-                messages_queue.append((iid, qty, text_html))
-                logger.warning("Не удалось отправить %s — возвращаем в очередь (длина сейчас %d)", iid, len(messages_queue))
-            await asyncio.sleep(0.25)
+            await self.init_session()
+            params = {"item_name": f"eq.{item_name}", "select": "user_id"}
+            
+            async with self.session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=5) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return [item['user_id'] for item in data]
+                return []
         except Exception as e:
-            logger.exception("Ошибка при отправке %s: %s — возвращаем в очередь", iid, e)
-            messages_queue.append((iid, qty, text_html))
+            logger.error(f"❌ Ошибка получения пользователей: {e}")
+            return []
 
-
-# ====== Обработка сигналов ======
-def handle_termination(signum, frame):
-    logger.info("Получен сигнал %s — завершаем процесс.", signum)
-    remove_lock()
-    os._exit(0)
-
-signal.signal(signal.SIGINT, handle_termination)
-signal.signal(signal.SIGTERM, handle_termination)
-
-
-# ====== Вспомогательные фоновые циклы (если job_queue отсутствует) ======
-async def _background_monitor_loop(app):
-    # first run after 5s
-    await asyncio.sleep(5)
-    while True:
+class StockTracker:
+    """Отслеживание стока игры"""
+    
+    def __init__(self):
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.db = SupabaseDB()
+    
+    async def init_session(self):
+        if not self.session or self.session.closed:
+            self.session = aiohttp.ClientSession()
+    
+    async def close_session(self):
+        if self.session and not self.session.closed:
+            await self.session.close()
+        await self.db.close_session()
+    
+    async def fetch_api(self, url: str) -> Optional[List[Dict]]:
+        """Запрос к API игры"""
         try:
-            await monitor_job(None)
-        except Exception:
-            logger.exception("Ошибка в _background_monitor_loop")
-        await asyncio.sleep(10)
+            await self.init_session()
+            async with self.session.get(url, timeout=10) as response:
+                if response.status == 200:
+                    return await response.json()
+                return None
+        except Exception as e:
+            logger.error(f"❌ Ошибка API: {e}")
+            return None
+    
+    async def fetch_seeds(self) -> Optional[List[Dict]]:
+        """Получение стока семян"""
+        return await self.fetch_api(SEEDS_API)
+    
+    async def fetch_gear(self) -> Optional[List[Dict]]:
+        """Получение стока гира"""
+        return await self.fetch_api(GEAR_API)
+    
+    async def fetch_cosmetics(self) -> Optional[List[Dict]]:
+        """Получение стока косметики"""
+        return await self.fetch_api(COSMETICS_API)
 
+tracker = StockTracker()
+db = SupabaseDB()
 
-async def _background_sender_loop(app):
-    await asyncio.sleep(7)
-    while True:
-        try:
-            ctx = types.SimpleNamespace(bot=getattr(app, 'bot', None))
-            await sender_job(ctx)
-        except Exception:
-            logger.exception("Ошибка в _background_sender_loop")
-        await asyncio.sleep(1)
+# ========== КОМАНДЫ БОТА ==========
 
-
-# ====== Main: acquire lock, стартуем Flask в thread, запускаем polling в main thread ======
-def main():
-    acquire_lock_or_exit()
-
-    # Запускаем Flask в фоновом потоке (use_reloader=False важно)
-    flask_thread = threading.Thread(
-        target=lambda: flask_app.run(host="0.0.0.0", port=KEEPALIVE_PORT, use_reloader=False),
-        daemon=True,
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /start"""
+    welcome = (
+        "🌱 *Добро пожаловать в GAG Stock Tracker!*\n\n"
+        "Я помогу вам отслеживать сток семян, гира и косметики.\n\n"
+        "📖 *Доступные команды:*\n"
+        "🌱 /stock - Текущий сток\n"
+        "✨ /cosmetic - Косметика\n"
+        "🔔 /autostock - Управление автостоками\n"
+        "📋 /seeds - Все семена\n"
+        "⚔️ /gear - Все гир\n"
+        "🥚 /eggs - Яйца\n"
+        "❓ /help - Справка"
     )
-    flask_thread.start()
-    logger.info("Flask thread started (daemon) on port %s", KEEPALIVE_PORT)
+    await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
 
-    # Теперь запускаем polling в главном потоке — это важно для signal handlers
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN не задан — выходим.")
-        remove_lock()
-        return
+async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /stock - просмотр текущего стока"""
+    seeds = await tracker.fetch_seeds()
+    gear = await tracker.fetch_gear()
+    
+    message = "📊 *ТЕКУЩИЙ СТОК*\n\n"
+    
+    # Семена
+    if seeds:
+        message += "🌱 *СЕМЕНА:*\n"
+        for item in seeds:
+            name = item.get('name', '')
+            quantity = item.get('quantity', 0)
+            if name in SEEDS_DATA:
+                data = SEEDS_DATA[name]
+                message += f"{data['emoji']} *{name}* x{quantity}\n"
+        message += "\n"
+    else:
+        message += "🌱 *СЕМЕНА:* _Пусто_\n\n"
+    
+    # Гир
+    if gear:
+        message += "⚔️ *ГИР:*\n"
+        for item in gear:
+            name = item.get('name', '')
+            quantity = item.get('quantity', 0)
+            if name in GEAR_DATA:
+                data = GEAR_DATA[name]
+                message += f"{data['emoji']} *{name}* x{quantity}\n"
+    else:
+        message += "⚔️ *ГИР:* _Пусто_"
+    
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
-    try:
-        app = ApplicationBuilder().token(BOT_TOKEN).build()
+async def cosmetic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /cosmetic - просмотр косметики"""
+    cosmetics = await tracker.fetch_cosmetics()
+    
+    message = "✨ *СТОК КОСМЕТИКИ*\n\n"
+    
+    if cosmetics:
+        for item in cosmetics:
+            name = item.get('name', '')
+            quantity = item.get('quantity', 0)
+            message += f"🎨 *{name}* x{quantity}\n"
+    else:
+        message += "_Пусто_"
+    
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
-        # Register handlers
-        app.add_handler(CommandHandler("start", start_handler))
-        app.add_handler(CommandHandler("stock", handle_stock))
-        app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_stock"))
-        app.add_handler(CallbackQueryHandler(handle_stock, pattern="show_cosmetic"))
-
-        # try to ensure job_queue exists (on some PTB installs app.job_queue Может быть None until initialize)
-        try:
-            if app.job_queue is None:
-                logger.info("app.job_queue is None — пытаемся вызвать initialize() чтобы создать job_queue")
-                loop = asyncio.get_event_loop()
-                if not loop.is_running():
-                    loop.run_until_complete(app.initialize())
-                else:
-                    # если loop уже запущен - инициализируем синхронно через run_until_complete небезопасно,
-                    # но такие ситуации редки для стандартного запуска — логируем
-                    logger.warning("Event loop уже запущен — пропускаем явную инициализацию")
-        except Exception as e:
-            logger.exception("Не удалось инициализировать application для job_queue: %s", e)
-
-        # теперь job_queue должен быть создан
-        if getattr(app, 'job_queue', None) is not None:
-            try:
-                app.job_queue.run_repeating(monitor_job, interval=10, first=5)
-                app.job_queue.run_repeating(sender_job, interval=1, first=7)
-            except Exception as e:
-                logger.exception("Ошибка при создании задач в job_queue: %s", e)
-        else:
-            # fallback: если по какой-то причине job_queue всё ещё None, запускаем наши фоновые циклы через app.create_task
-            logger.warning("job_queue отсутствует — запускаем фоновые корутины вручную")
-            # сохраняем bot для sender_job fallback
-            globals()['APP_BOT'] = None
-            # стартуем приложение и создаём задачи внутри контекста приложения
-            async def _start_background_and_run():
-                await app.initialize()
-                # app.bot станет доступен после initialize/start
-                globals()['APP_BOT'] = app.bot
-                # создаём фоновые задачи
-                app.create_task(_background_monitor_loop(app))
-                app.create_task(_background_sender_loop(app))
-                # запускаем polling (это заблокирует до остановки)
-                await app.start()
-                await app.updater.start_polling()
-
-            # запускаем синхронно
-            loop = asyncio.get_event_loop()
-            if not loop.is_running():
-                loop.run_until_complete(_start_background_and_run())
-                # после завершения (обычно при остановке) — корректный выход
-                logger.info("_start_background_and_run завершился")
-                return
+async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /autostock - управление автостоками"""
+    user_id = update.effective_user.id
+    user_items = await db.load_user_autostocks(user_id, use_cache=True)
+    
+    message = "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
+    
+    if user_items:
+        message += "📋 *Ваши отслеживаемые предметы:*\n"
+        for item_name in sorted(user_items):
+            if item_name in SEEDS_DATA:
+                emoji = SEEDS_DATA[item_name]['emoji']
+            elif item_name in GEAR_DATA:
+                emoji = GEAR_DATA[item_name]['emoji']
             else:
-                logger.error("Не умеем корректно стартовать background tasks если event loop уже запущен")
+                emoji = "📦"
+            message += f"{emoji} {item_name}\n"
+        message += "\n"
+    else:
+        message += "_Пусто - используйте кнопки ниже_\n\n"
+    
+    message += (
+        "📝 *Команды:*\n"
+        "/add_autostock <название> - Добавить\n"
+        "/remove_autostock <название> - Удалить\n"
+        "/list_autostock - Мой список\n\n"
+        "⏰ Проверка: каждые 5 минут\n"
+        "📢 Редкие предметы: уведомления в канал"
+    )
+    
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
-        # если мы здесь — job_queue создан и расписания поставлены; запустим обычный polling
-        logger.info("Запуск polling в главном потоке...")
-        # сохраняем bot в глобальную переменную на случай fallback'ов
-        globals()['APP_BOT'] = app.bot
-        app.run_polling()  # <-- запускается в main thread, signal handlers будут работать
-        logger.info("app.run_polling() завершился (обычно при stop).")
-    except Exception as e:
-        logger.exception("Ошибка при run_polling: %s", e)
-    finally:
-        remove_lock()
+async def add_autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Добавить предмет в автосток"""
+    user_id = update.effective_user.id
+    
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Укажите название предмета\n"
+            "Пример: /add_autostock Crimson Thorn",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    item_name = ' '.join(context.args)
+    
+    if item_name not in SEEDS_DATA and item_name not in GEAR_DATA:
+        await update.message.reply_text(
+            f"❌ Предмет '{item_name}' не найден",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    success = await db.save_user_autostock(user_id, item_name)
+    
+    if success:
+        if item_name in SEEDS_DATA:
+            info = SEEDS_DATA[item_name]
+        else:
+            info = GEAR_DATA[item_name]
+        
+        message = (
+            f"✅ *ДОБАВЛЕНО В АВТОСТОК*\n\n"
+            f"{info['emoji']} *{item_name}*\n"
+            f"Цена: {info['price']} ¢"
+        )
+        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text("❌ Ошибка при добавлении", parse_mode=ParseMode.MARKDOWN)
 
+async def remove_autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удалить предмет из автостока"""
+    user_id = update.effective_user.id
+    
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Укажите название предмета\n"
+            "Пример: /remove_autostock Crimson Thorn",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    item_name = ' '.join(context.args)
+    success = await db.remove_user_autostock(user_id, item_name)
+    
+    if success:
+        await update.message.reply_text(
+            f"🗑️ *УДАЛЕНО ИЗ АВТОСТОКА*\n\n"
+            f"*{item_name}* больше не отслеживается",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await update.message.reply_text("❌ Ошибка при удалении", parse_mode=ParseMode.MARKDOWN)
+
+async def list_autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Список автостоков пользователя"""
+    user_id = update.effective_user.id
+    user_items = await db.load_user_autostocks(user_id, use_cache=True)
+    
+    message = "📋 *МОИ АВТОСТОКИ*\n\n"
+    
+    if not user_items:
+        message += "_Нет отслеживаемых предметов_"
+    else:
+        for item_name in sorted(user_items):
+            if item_name in SEEDS_DATA:
+                info = SEEDS_DATA[item_name]
+            elif item_name in GEAR_DATA:
+                info = GEAR_DATA[item_name]
+            else:
+                info = {"emoji": "📦", "price": "Unknown"}
+            message += f"{info['emoji']} *{item_name}* ({info['price']} ₪)\n"
+        message += f"\n_Всего: {len(user_items)} предметов_"
+    
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+
+async def seeds_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Список всех семян"""
+    message = "🌱 *ВСЕ СЕМЕНА*\n\n"
+    for name, info in sorted(SEEDS_DATA.items()):
+        message += f"{info['emoji']} *{name}*\n_Цена: {info['price']} ¢ ({info['rarity']})_\n\n"
+    
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+
+async def gear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Список всего гира"""
+    message = "⚔️ *ВСЕ ГИР*\n\n"
+    for name, info in sorted(GEAR_DATA.items()):
+        message += f"{info['emoji']} *{name}*: {info['price']} ₪\n"
+    
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+
+async def eggs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Список яиц"""
+    message = "🥚 *ВСЕ ЯЙЦА*\n\n"
+    for name, info in EGGS_DATA.items():
+        message += f"{info['emoji']} *{name}*: {info['price']} ₪\n"
+    
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Справка"""
+    help_text = (
+        "❓ *СПРАВКА*\n\n"
+        "📊 *Просмотр стока:*\n"
+        "/stock - Текущий сток\n"
+        "/cosmetic - Косметика\n"
+        "/seeds - Все семена\n"
+        "/gear - Все гир\n"
+        "/eggs - Яйца\n\n"
+        "🔔 *Автостоки:*\n"
+        "/autostock - Информация\n"
+        "/add_autostock <н> - Добавить\n"
+        "/remove_autostock <н> - Удалить\n"
+        "/list_autostock - Мой список\n\n"
+        "⏰ Проверка каждые 5 минут\n"
+        "📢 Уведомления в канал: @GroowAGarden\n"
+        "📢 Личные уведомления: в личке боте"
+    )
+    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+
+# ========== ПЕРИОДИЧЕСКАЯ ПРОВЕРКА СТОКА ==========
+
+async def stock_check(application: Application):
+    """Периодическая проверка стока и отправка уведомлений"""
+    global last_stock_state
+    
+    while True:
+        try:
+            now = get_moscow_time()
+            logger.info(f"🔍 Проверка стока - {now.strftime('%H:%M:%S')}")
+            
+            seeds = await tracker.fetch_seeds()
+            
+            if not seeds:
+                await asyncio.sleep(300)
+                continue
+            
+            current_stock = {item['name']: item['quantity'] for item in seeds}
+            
+            # ===== УВЕДОМЛЕНИЯ В КАНАЛ (только 2 редких семена) =====
+            for item_name in RAREST_SEEDS:
+                current_count = current_stock.get(item_name, 0)
+                previous_count = last_stock_state.get(item_name, 0)
+                
+                # Если предмет появился или количество увеличилось
+                if current_count > 0 and previous_count == 0:
+                    if item_name in SEEDS_DATA:
+                        info = SEEDS_DATA[item_name]
+                        message = (
+                            f"🚨 *РЕДКИЙ ПРЕДМЕТ В СТОКЕ!* 🚨\n\n"
+                            f"{info['emoji']} *{item_name}*\n"
+                            f"📦 Количество: *x{current_count}*\n"
+                            f"💰 Цена: {info['price']} ¢\n"
+                            f"⚡ Редкость: {info['rarity']}\n\n"
+                            f"🕒 {now.strftime('%H:%M:%S')} МСК"
+                        )
+                        try:
+                            await application.bot.send_message(
+                                chat_id=CHANNEL_ID,
+                                text=message,
+                                parse_mode=ParseMode.MARKDOWN
+                            )
+                            logger.info(f"✅ Уведомление в канал: {item_name} x{current_count}")
+                        except Exception as e:
+                            logger.error(f"❌ Ошибка отправки в канал: {e}")
+            
+            # ===== ЛИЧНЫЕ УВЕДОМЛЕНИЯ (автостоки пользователей) =====
+            for item_name, count in current_stock.items():
+                users = await db.get_users_tracking_item(item_name)
+                for user_id in users:
+                    try:
+                        if item_name in SEEDS_DATA:
+                            info = SEEDS_DATA[item_name]
+                        elif item_name in GEAR_DATA:
+                            info = GEAR_DATA[item_name]
+                        else:
+                            info = {"emoji": "📦", "price": "Unknown"}
+                        
+                        message = (
+                            f"🔔 *АВТОСТОК - ПРЕДМЕТ ПОЯВИЛСЯ!*\n\n"
+                            f"{info['emoji']} *{item_name}*\n"
+                            f"📦 Количество: *x{count}*\n"
+                            f"💰 Цена: {info['price']} ¢\n"
+                            f"🕒 {now.strftime('%H:%M:%S')} МСК"
+                        )
+                        
+                        await application.bot.send_message(
+                            chat_id=user_id,
+                            text=message,
+                            parse_mode=ParseMode.MARKDOWN
+                        )
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка отправки пользователю {user_id}: {e}")
+            
+            # Обновляем состояние стока
+            last_stock_state = current_stock.copy()
+            
+            # Ждем 5 минут до следующей проверки
+            await asyncio.sleep(300)
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка stock_check: {e}")
+            await asyncio.sleep(300)
+
+# ========== ЗАПУСК БОТА ==========
+
+async def main():
+    logger.info("="*60)
+    logger.info("🌱 GAG Stock Tracker Bot (Telegram)")
+    logger.info("="*60)
+    
+    if not BOT_TOKEN:
+        raise ValueError("BOT_TOKEN не установлен!")
+    
+    logger.info(f"📢 Канал уведомлений: {CHANNEL_ID}")
+    logger.info(f"🔔 Редкие семена для канала: {', '.join(RAREST_SEEDS)}")
+    
+    # Создаем приложение
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # Команды
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("stock", stock_command))
+    application.add_handler(CommandHandler("cosmetic", cosmetic_command))
+    application.add_handler(CommandHandler("autostock", autostock_command))
+    application.add_handler(CommandHandler("add_autostock", add_autostock_command))
+    application.add_handler(CommandHandler("remove_autostock", remove_autostock_command))
+    application.add_handler(CommandHandler("list_autostock", list_autostock_command))
+    application.add_handler(CommandHandler("seeds", seeds_command))
+    application.add_handler(CommandHandler("gear", gear_command))
+    application.add_handler(CommandHandler("eggs", eggs_command))
+    application.add_handler(CommandHandler("help", help_command))
+    
+    # Запускаем периодическую проверку стока
+    asyncio.create_task(stock_check(application))
+    
+    # Запускаем бота
+    logger.info("🚀 Бот запущен!")
+    await application.run_polling(allowed_updates=None, drop_pending_updates=True)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
