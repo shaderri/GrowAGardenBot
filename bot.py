@@ -483,52 +483,54 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ========== ПЕРИОДИЧЕСКАЯ ПРОВЕРКА СТОКА ==========
 
-async def stock_check(application: Application):
+async def stock_check(context: ContextTypes.DEFAULT_TYPE):
     """Периодическая проверка стока и отправка уведомлений"""
     global last_stock_state
     
-    while True:
-        try:
-            now = get_moscow_time()
-            logger.info(f"🔍 Проверка стока - {now.strftime('%H:%M:%S')}")
+    try:
+        now = get_moscow_time()
+        logger.info(f"🔍 Проверка стока - {now.strftime('%H:%M:%S')}")
+        
+        seeds = await tracker.fetch_seeds()
+        
+        if not seeds:
+            return
+        
+        current_stock = {item['name']: item['quantity'] for item in seeds}
+        
+        # ===== УВЕДОМЛЕНИЯ В КАНАЛ (только 2 редких семена) =====
+        for item_name in RAREST_SEEDS:
+            current_count = current_stock.get(item_name, 0)
+            previous_count = last_stock_state.get(item_name, 0)
             
-            seeds = await tracker.fetch_seeds()
-            
-            if not seeds:
-                await asyncio.sleep(300)
-                continue
-            
-            current_stock = {item['name']: item['quantity'] for item in seeds}
-            
-            # ===== УВЕДОМЛЕНИЯ В КАНАЛ (только 2 редких семена) =====
-            for item_name in RAREST_SEEDS:
-                current_count = current_stock.get(item_name, 0)
-                previous_count = last_stock_state.get(item_name, 0)
-                
-                # Если предмет появился или количество увеличилось
-                if current_count > 0 and previous_count == 0:
-                    if item_name in SEEDS_DATA:
-                        info = SEEDS_DATA[item_name]
-                        message = (
-                            f"🚨 *РЕДКИЙ ПРЕДМЕТ В СТОКЕ!* 🚨\n\n"
-                            f"{info['emoji']} *{item_name}*\n"
-                            f"📦 Количество: *x{current_count}*\n"
-                            f"💰 Цена: {info['price']} ₪\n"
-                            f"⚡ Редкость: {info['rarity']}\n\n"
-                            f"🕒 {now.strftime('%H:%M:%S')} МСК"
+            # Если предмет появился или количество увеличилось
+            if current_count > 0 and previous_count == 0:
+                if item_name in SEEDS_DATA:
+                    info = SEEDS_DATA[item_name]
+                    message = (
+                        f"🚨 *РЕДКИЙ ПРЕДМЕТ В СТОКЕ!* 🚨\n\n"
+                        f"{info['emoji']} *{item_name}*\n"
+                        f"📦 Количество: *x{current_count}*\n"
+                        f"💰 Цена: {info['price']} ₪\n"
+                        f"⚡ Редкость: {info['rarity']}\n\n"
+                        f"🕒 {now.strftime('%H:%M:%S')} МСК"
+                    )
+                    try:
+                        await context.bot.send_message(
+                            chat_id=CHANNEL_ID,
+                            text=message,
+                            parse_mode=ParseMode.MARKDOWN
                         )
-                        try:
-                            await application.bot.send_message(
-                                chat_id=CHANNEL_ID,
-                                text=message,
-                                parse_mode=ParseMode.MARKDOWN
-                            )
-                            logger.info(f"✅ Уведомление в канал: {item_name} x{current_count}")
-                        except Exception as e:
-                            logger.error(f"❌ Ошибка отправки в канал: {e}")
+                        logger.info(f"✅ Уведомление в канал: {item_name} x{current_count}")
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка отправки в канал: {e}")
+        
+        # ===== ЛИЧНЫЕ УВЕДОМЛЕНИЯ (автостоки пользователей) =====
+        for item_name, count in current_stock.items():
+            previous_count = last_stock_state.get(item_name, 0)
             
-            # ===== ЛИЧНЫЕ УВЕДОМЛЕНИЯ (автостоки пользователей) =====
-            for item_name, count in current_stock.items():
+            # Отправляем уведомление только если предмет появился
+            if count > 0 and previous_count == 0:
                 users = await db.get_users_tracking_item(item_name)
                 for user_id in users:
                     try:
@@ -547,25 +549,25 @@ async def stock_check(application: Application):
                             f"🕒 {now.strftime('%H:%M:%S')} МСК"
                         )
                         
-                        await application.bot.send_message(
+                        await context.bot.send_message(
                             chat_id=user_id,
                             text=message,
                             parse_mode=ParseMode.MARKDOWN
                         )
                     except Exception as e:
                         logger.error(f"❌ Ошибка отправки пользователю {user_id}: {e}")
-            
-            # Обновляем состояние стока
-            last_stock_state = current_stock.copy()
-            
-            # Ждем 5 минут до следующей проверки
-            await asyncio.sleep(300)
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка stock_check: {e}")
-            await asyncio.sleep(300)
+        
+        # Обновляем состояние стока
+        last_stock_state = current_stock.copy()
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка stock_check: {e}")
 
 # ========== ЗАПУСК БОТА ==========
+
+async def post_init(application: Application):
+    """Инициализация после запуска приложения"""
+    logger.info("🚀 Бот запущен! Начинаем мониторинг стока...")
 
 async def main():
     logger.info("="*60)
@@ -594,11 +596,19 @@ async def main():
     application.add_handler(CommandHandler("eggs", eggs_command))
     application.add_handler(CommandHandler("help", help_command))
     
-    # Запускаем периодическую проверку стока
-    asyncio.create_task(stock_check(application))
+    # Добавляем периодическую задачу проверки стока (каждые 5 минут)
+    job_queue = application.job_queue
+    job_queue.run_repeating(
+        stock_check, 
+        interval=CHECK_INTERVAL_MINUTES * 60,  # 5 минут в секундах
+        first=5  # Первая проверка через 5 секунд после запуска
+    )
+    
+    # Добавляем callback после инициализации
+    application.post_init = post_init
     
     # Запускаем бота
-    logger.info("🚀 Бот запущен!")
+    logger.info("🚀 Запускаем бота...")
     await application.run_polling(allowed_updates=None, drop_pending_updates=True)
 
 if __name__ == "__main__":
