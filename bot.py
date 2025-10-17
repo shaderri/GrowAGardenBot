@@ -26,6 +26,8 @@ GAG_API_BASE = "https://gagapi.onrender.com"
 SEEDS_API = f"{GAG_API_BASE}/seeds"
 GEAR_API = f"{GAG_API_BASE}/gear"
 COSMETICS_API = f"{GAG_API_BASE}/cosmetics"
+EGGS_API = f"{GAG_API_BASE}/eggs"
+WEATHER_API = f"{GAG_API_BASE}/weather"
 
 CHECK_INTERVAL_MINUTES = 5
 AUTOSTOCK_CACHE_TTL = 60
@@ -66,23 +68,23 @@ SEEDS_DATA = {
 }
 
 GEAR_DATA = {
-    "Watering Can": {"emoji": "💧", "price": "50,000", "stock": 39},
-    "Trowel": {"emoji": "🔨", "price": "100,000", "stock": 49},
-    "Trading Ticket": {"emoji": "🎫", "price": "100,000", "stock": 19},
-    "Recall Wrench": {"emoji": "🔧", "price": "150,000", "stock": 59},
-    "Basic Sprinkler": {"emoji": "💦", "price": "25,000", "stock": 0},
-    "Advanced Sprinkler": {"emoji": "💦", "price": "50,000", "stock": 99},
-    "Medium Treat": {"emoji": "🍖", "price": "4,000,000", "stock": 199},
-    "Medium Toy": {"emoji": "🎮", "price": "4,000,000", "stock": 189},
-    "Godly Sprinkler": {"emoji": "✨", "price": "120,000", "stock": 149},
-    "Magnifying Glass": {"emoji": "🔍", "price": "10,000,000", "stock": 99},
-    "Master Sprinkler": {"emoji": "👑", "price": "10,000,000", "stock": 199},
-    "Cleaning Spray": {"emoji": "🧼", "price": "15,000,000", "stock": 139},
-    "Favorite Tool": {"emoji": "⭐", "price": "20,000,000", "stock": 119},
-    "Harvest Tool": {"emoji": "✂️", "price": "30,000,000", "stock": 149},
-    "Friendship Pot": {"emoji": "🪴", "price": "15,000,000", "stock": 39},
-    "Level Up Lollipop": {"emoji": "🍭", "price": "10,000,000,000", "stock": 79},
-    "Grandmaster Sprinkler": {"emoji": "🏆", "price": "1,000,000,000", "stock": 279},
+    "Watering Can": {"emoji": "💧", "price": "50,000"},
+    "Trowel": {"emoji": "🔨", "price": "100,000"},
+    "Trading Ticket": {"emoji": "🎫", "price": "100,000"},
+    "Recall Wrench": {"emoji": "🔧", "price": "150,000"},
+    "Basic Sprinkler": {"emoji": "💦", "price": "25,000"},
+    "Advanced Sprinkler": {"emoji": "💦", "price": "50,000"},
+    "Medium Treat": {"emoji": "🍖", "price": "4,000,000"},
+    "Medium Toy": {"emoji": "🎮", "price": "4,000,000"},
+    "Godly Sprinkler": {"emoji": "✨", "price": "120,000"},
+    "Magnifying Glass": {"emoji": "🔍", "price": "10,000,000"},
+    "Master Sprinkler": {"emoji": "👑", "price": "10,000,000"},
+    "Cleaning Spray": {"emoji": "🧼", "price": "15,000,000"},
+    "Favorite Tool": {"emoji": "⭐", "price": "20,000,000"},
+    "Harvest Tool": {"emoji": "✂️", "price": "30,000,000"},
+    "Friendship Pot": {"emoji": "🪴", "price": "15,000,000"},
+    "Level Up Lollipop": {"emoji": "🍭", "price": "10,000,000,000"},
+    "Grandmaster Sprinkler": {"emoji": "🏆", "price": "1,000,000,000"},
 }
 
 EGGS_DATA = {
@@ -111,6 +113,10 @@ logger = logging.getLogger(__name__)
 def get_moscow_time() -> datetime:
     """Получить текущее московское время"""
     return datetime.now(pytz.timezone('Europe/Moscow'))
+
+def format_moscow_time() -> str:
+    """Форматировать московское время"""
+    return get_moscow_time().strftime('%H:%M:%S')
 
 class SupabaseDB:
     """Работа с Supabase для автостоков"""
@@ -248,6 +254,14 @@ class StockTracker:
     async def fetch_cosmetics(self) -> Optional[List[Dict]]:
         """Получение стока косметики"""
         return await self.fetch_api(COSMETICS_API)
+    
+    async def fetch_eggs(self) -> Optional[List[Dict]]:
+        """Получение стока яиц"""
+        return await self.fetch_api(EGGS_API)
+    
+    async def fetch_weather(self) -> Optional[Dict]:
+        """Получение погоды"""
+        return await self.fetch_api(WEATHER_API)
 
 tracker = StockTracker()
 db = SupabaseDB()
@@ -257,24 +271,24 @@ db = SupabaseDB()
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start"""
     welcome = (
-        "🌱 *Добро пожаловать в GAG Stock Tracker!*\n\n"
-        "Я помогу вам отслеживать сток семян, гира и косметики.\n\n"
+        "🌱 *Добро пожаловать в GAG Stock Tracker\\!*\n\n"
+        "Я помогу вам отслеживать сток семян, гира, косметики и яиц\\.\n\n"
         "📖 *Доступные команды:*\n"
-        "🌱 /stock - Текущий сток\n"
-        "✨ /cosmetic - Косметика\n"
-        "🔔 /autostock - Управление автостоками\n"
-        "📋 /seeds - Все семена\n"
-        "⚔️ /gear - Все гир\n"
-        "🥚 /eggs - Яйца\n"
-        "❓ /help - Справка"
+        "🌱 /stock \\- Текущий сток\n"
+        "✨ /cosmetic \\- Косметика\n"
+        "🌤️ /weather \\- Погода\n"
+        "🔔 /autostock \\- Управление автостоками\n"
+        "❓ /help \\- Справка"
     )
-    await update.message.reply_text(welcome, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(welcome, parse_mode="MarkdownV2")
 
 async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /stock - просмотр текущего стока"""
     seeds = await tracker.fetch_seeds()
     gear = await tracker.fetch_gear()
+    eggs = await tracker.fetch_eggs()
     
+    current_time = format_moscow_time()
     message = "📊 *ТЕКУЩИЙ СТОК*\n\n"
     
     # Семена
@@ -290,23 +304,39 @@ async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         message += "🌱 *СЕМЕНА:* _Пусто_\n\n"
     
-    # Гир
+    # Гиры
     if gear:
-        message += "⚔️ *ГИР:*\n"
+        message += "⚔️ *ГИРЫ:*\n"
         for item in gear:
             name = item.get('name', '')
             quantity = item.get('quantity', 0)
             if name in GEAR_DATA:
                 data = GEAR_DATA[name]
                 message += f"{data['emoji']} *{name}* x{quantity}\n"
+        message += "\n"
     else:
-        message += "⚔️ *ГИР:* _Пусто_"
+        message += "⚔️ *ГИРЫ:* _Пусто_\n\n"
+    
+    # Яйца
+    if eggs:
+        message += "🥚 *ЯЙЦА:*\n"
+        for item in eggs:
+            name = item.get('name', '')
+            quantity = item.get('quantity', 0)
+            if name in EGGS_DATA:
+                data = EGGS_DATA[name]
+                message += f"{data['emoji']} *{name}* x{quantity}\n"
+    else:
+        message += "🥚 *ЯЙЦА:* _Пусто_"
+    
+    message += f"\n\n🕒 {current_time} МСК"
     
     await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
 async def cosmetic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /cosmetic - просмотр косметики"""
     cosmetics = await tracker.fetch_cosmetics()
+    current_time = format_moscow_time()
     
     message = "✨ *СТОК КОСМЕТИКИ*\n\n"
     
@@ -318,12 +348,35 @@ async def cosmetic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         message += "_Пусто_"
     
+    message += f"\n\n🕒 {current_time} МСК"
+    
+    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+
+async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /weather - просмотр погоды"""
+    weather = await tracker.fetch_weather()
+    current_time = format_moscow_time()
+    
+    message = "🌤️ *ПОГОДА В ИГРЕ*\n\n"
+    
+    if weather and isinstance(weather, list) and len(weather) > 0:
+        weather_data = weather[0]
+        current = weather_data.get('current', 'Неизвестно')
+        upcoming = weather_data.get('upcoming', 'Неизвестно')
+        message += f"*Текущая:* {current}\n"
+        message += f"*Следующая:* {upcoming}"
+    else:
+        message += "_Данные недоступны_"
+    
+    message += f"\n\n🕒 {current_time} МСК"
+    
     await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
 async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /autostock - управление автостоками"""
     user_id = update.effective_user.id
     user_items = await db.load_user_autostocks(user_id, use_cache=True)
+    current_time = format_moscow_time()
     
     message = "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
     
@@ -339,15 +392,16 @@ async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message += f"{emoji} {item_name}\n"
         message += "\n"
     else:
-        message += "_Пусто - используйте кнопки ниже_\n\n"
+        message += "_Пусто - используйте команды ниже_\n\n"
     
     message += (
         "📝 *Команды:*\n"
-        "/add_autostock <название> - Добавить\n"
-        "/remove_autostock <название> - Удалить\n"
-        "/list_autostock - Мой список\n\n"
+        "/add\\_autostock название - Добавить\n"
+        "/remove\\_autostock название - Удалить\n"
+        "/list\\_autostock - Мой список\n\n"
         "⏰ Проверка: каждые 5 минут\n"
-        "📢 Редкие предметы: уведомления в канал"
+        "📢 Редкие предметы: уведомления в канал\n\n"
+        f"🕒 {current_time} МСК"
     )
     
     await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
@@ -355,11 +409,13 @@ async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def add_autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Добавить предмет в автосток"""
     user_id = update.effective_user.id
+    current_time = format_moscow_time()
     
     if not context.args:
         await update.message.reply_text(
             "❌ Укажите название предмета\n"
-            "Пример: /add_autostock Crimson Thorn",
+            f"Пример: /add\\_autostock Crimson Thorn\n\n"
+            f"🕒 {current_time} МСК",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -368,7 +424,8 @@ async def add_autostock_command(update: Update, context: ContextTypes.DEFAULT_TY
     
     if item_name not in SEEDS_DATA and item_name not in GEAR_DATA:
         await update.message.reply_text(
-            f"❌ Предмет '{item_name}' не найден",
+            f"❌ Предмет '{item_name}' не найден\n\n"
+            f"🕒 {current_time} МСК",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -384,20 +441,26 @@ async def add_autostock_command(update: Update, context: ContextTypes.DEFAULT_TY
         message = (
             f"✅ *ДОБАВЛЕНО В АВТОСТОК*\n\n"
             f"{info['emoji']} *{item_name}*\n"
-            f"Цена: {info['price']} ₪"
+            f"Цена: {info['price']} ¢\n\n"
+            f"🕒 {current_time} МСК"
         )
         await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
     else:
-        await update.message.reply_text("❌ Ошибка при добавлении", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(
+            f"❌ Ошибка при добавлении\n\n🕒 {current_time} МСК",
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 async def remove_autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Удалить предмет из автостока"""
     user_id = update.effective_user.id
+    current_time = format_moscow_time()
     
     if not context.args:
         await update.message.reply_text(
             "❌ Укажите название предмета\n"
-            "Пример: /remove_autostock Crimson Thorn",
+            f"Пример: /remove\\_autostock Crimson Thorn\n\n"
+            f"🕒 {current_time} МСК",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -408,16 +471,21 @@ async def remove_autostock_command(update: Update, context: ContextTypes.DEFAULT
     if success:
         await update.message.reply_text(
             f"🗑️ *УДАЛЕНО ИЗ АВТОСТОКА*\n\n"
-            f"*{item_name}* больше не отслеживается",
+            f"*{item_name}* больше не отслеживается\n\n"
+            f"🕒 {current_time} МСК",
             parse_mode=ParseMode.MARKDOWN
         )
     else:
-        await update.message.reply_text("❌ Ошибка при удалении", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(
+            f"❌ Ошибка при удалении\n\n🕒 {current_time} МСК",
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 async def list_autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Список автостоков пользователя"""
     user_id = update.effective_user.id
     user_items = await db.load_user_autostocks(user_id, use_cache=True)
+    current_time = format_moscow_time()
     
     message = "📋 *МОИ АВТОСТОКИ*\n\n"
     
@@ -431,53 +499,31 @@ async def list_autostock_command(update: Update, context: ContextTypes.DEFAULT_T
                 info = GEAR_DATA[item_name]
             else:
                 info = {"emoji": "📦", "price": "Unknown"}
-            message += f"{info['emoji']} *{item_name}* ({info['price']} ₪)\n"
+            message += f"{info['emoji']} *{item_name}* ({info['price']} ¢)\n"
         message += f"\n_Всего: {len(user_items)} предметов_"
     
-    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
-
-async def seeds_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Список всех семян"""
-    message = "🌱 *ВСЕ СЕМЕНА*\n\n"
-    for name, info in sorted(SEEDS_DATA.items()):
-        message += f"{info['emoji']} *{name}*\n_Цена: {info['price']} ₪ ({info['rarity']})_\n\n"
-    
-    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
-
-async def gear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Список всего гира"""
-    message = "⚔️ *ВСЕ ГИР*\n\n"
-    for name, info in sorted(GEAR_DATA.items()):
-        message += f"{info['emoji']} *{name}*: {info['price']} ₪\n"
-    
-    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
-
-async def eggs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Список яиц"""
-    message = "🥚 *ВСЕ ЯЙЦА*\n\n"
-    for name, info in EGGS_DATA.items():
-        message += f"{info['emoji']} *{name}*: {info['price']} ₪\n"
+    message += f"\n\n🕒 {current_time} МСК"
     
     await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Справка"""
+    current_time = format_moscow_time()
     help_text = (
         "❓ *СПРАВКА*\n\n"
         "📊 *Просмотр стока:*\n"
         "/stock - Текущий сток\n"
         "/cosmetic - Косметика\n"
-        "/seeds - Все семена\n"
-        "/gear - Все гир\n"
-        "/eggs - Яйца\n\n"
+        "/weather - Погода\n\n"
         "🔔 *Автостоки:*\n"
         "/autostock - Информация\n"
-        "/add_autostock <н> - Добавить\n"
-        "/remove_autostock <н> - Удалить\n"
-        "/list_autostock - Мой список\n\n"
+        "/add\\_autostock название - Добавить\n"
+        "/remove\\_autostock название - Удалить\n"
+        "/list\\_autostock - Мой список\n\n"
         "⏰ Проверка каждые 5 минут\n"
         "📢 Уведомления в канал: @GroowAGarden\n"
-        "📢 Личные уведомления: в личке боте"
+        f"📢 Личные уведомления: в личке бота\n\n"
+        f"🕒 {current_time} МСК"
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -489,7 +535,8 @@ async def stock_check(context: ContextTypes.DEFAULT_TYPE):
     
     try:
         now = get_moscow_time()
-        logger.info(f"🔍 Проверка стока - {now.strftime('%H:%M:%S')}")
+        current_time = format_moscow_time()
+        logger.info(f"🔍 Проверка стока - {current_time}")
         
         seeds = await tracker.fetch_seeds()
         
@@ -508,12 +555,12 @@ async def stock_check(context: ContextTypes.DEFAULT_TYPE):
                 if item_name in SEEDS_DATA:
                     info = SEEDS_DATA[item_name]
                     message = (
-                        f"🚨 *РЕДКИЙ ПРЕДМЕТ В СТОКЕ!* 🚨\n\n"
+                        f"🚨 *РЕДКИЙ ПРЕДМЕТ В СТОКЕ\\!* 🚨\n\n"
                         f"{info['emoji']} *{item_name}*\n"
                         f"📦 Количество: *x{current_count}*\n"
-                        f"💰 Цена: {info['price']} ₪\n"
+                        f"💰 Цена: {info['price']} ¢\n"
                         f"⚡ Редкость: {info['rarity']}\n\n"
-                        f"🕒 {now.strftime('%H:%M:%S')} МСК"
+                        f"🕒 {current_time} МСК"
                     )
                     try:
                         await context.bot.send_message(
@@ -542,11 +589,11 @@ async def stock_check(context: ContextTypes.DEFAULT_TYPE):
                             info = {"emoji": "📦", "price": "Unknown"}
                         
                         message = (
-                            f"🔔 *АВТОСТОК - ПРЕДМЕТ ПОЯВИЛСЯ!*\n\n"
+                            f"🔔 *АВТОСТОК - ПРЕДМЕТ ПОЯВИЛСЯ\\!*\n\n"
                             f"{info['emoji']} *{item_name}*\n"
                             f"📦 Количество: *x{count}*\n"
-                            f"💰 Цена: {info['price']} ₪\n"
-                            f"🕒 {now.strftime('%H:%M:%S')} МСК"
+                            f"💰 Цена: {info['price']} ¢\n\n"
+                            f"🕒 {current_time} МСК"
                         )
                         
                         await context.bot.send_message(
@@ -583,13 +630,11 @@ def main():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("stock", stock_command))
     application.add_handler(CommandHandler("cosmetic", cosmetic_command))
+    application.add_handler(CommandHandler("weather", weather_command))
     application.add_handler(CommandHandler("autostock", autostock_command))
     application.add_handler(CommandHandler("add_autostock", add_autostock_command))
     application.add_handler(CommandHandler("remove_autostock", remove_autostock_command))
     application.add_handler(CommandHandler("list_autostock", list_autostock_command))
-    application.add_handler(CommandHandler("seeds", seeds_command))
-    application.add_handler(CommandHandler("gear", gear_command))
-    application.add_handler(CommandHandler("eggs", eggs_command))
     application.add_handler(CommandHandler("help", help_command))
     
     # Добавляем периодическую задачу проверки стока (каждые 5 минут)
