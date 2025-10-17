@@ -384,7 +384,7 @@ async def add_autostock_command(update: Update, context: ContextTypes.DEFAULT_TY
         message = (
             f"✅ *ДОБАВЛЕНО В АВТОСТОК*\n\n"
             f"{info['emoji']} *{item_name}*\n"
-            f"Цена: {info['price']} ¢"
+            f"Цена: {info['price']} ₪"
         )
         await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
     else:
@@ -440,7 +440,7 @@ async def seeds_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Список всех семян"""
     message = "🌱 *ВСЕ СЕМЕНА*\n\n"
     for name, info in sorted(SEEDS_DATA.items()):
-        message += f"{info['emoji']} *{name}*\n_Цена: {info['price']} ¢ ({info['rarity']})_\n\n"
+        message += f"{info['emoji']} *{name}*\n_Цена: {info['price']} ₪ ({info['rarity']})_\n\n"
     
     await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
@@ -511,7 +511,7 @@ async def stock_check(context: ContextTypes.DEFAULT_TYPE):
                         f"🚨 *РЕДКИЙ ПРЕДМЕТ В СТОКЕ!* 🚨\n\n"
                         f"{info['emoji']} *{item_name}*\n"
                         f"📦 Количество: *x{current_count}*\n"
-                        f"💰 Цена: {info['price']} ¢\n"
+                        f"💰 Цена: {info['price']} ₪\n"
                         f"⚡ Редкость: {info['rarity']}\n\n"
                         f"🕒 {now.strftime('%H:%M:%S')} МСК"
                     )
@@ -545,7 +545,7 @@ async def stock_check(context: ContextTypes.DEFAULT_TYPE):
                             f"🔔 *АВТОСТОК - ПРЕДМЕТ ПОЯВИЛСЯ!*\n\n"
                             f"{info['emoji']} *{item_name}*\n"
                             f"📦 Количество: *x{count}*\n"
-                            f"💰 Цена: {info['price']} ¢\n"
+                            f"💰 Цена: {info['price']} ₪\n"
                             f"🕒 {now.strftime('%H:%M:%S')} МСК"
                         )
                         
@@ -565,11 +565,7 @@ async def stock_check(context: ContextTypes.DEFAULT_TYPE):
 
 # ========== ЗАПУСК БОТА ==========
 
-async def post_init(application: Application):
-    """Инициализация после запуска приложения"""
-    logger.info("🚀 Бот запущен! Начинаем мониторинг стока...")
-
-async def main():
+def main():
     logger.info("="*60)
     logger.info("🌱 GAG Stock Tracker Bot (Telegram)")
     logger.info("="*60)
@@ -604,12 +600,9 @@ async def main():
         first=5  # Первая проверка через 5 секунд после запуска
     )
     
-    # Добавляем callback после инициализации
-    application.post_init = post_init
-    
-    # Запускаем бота
+    # Запускаем бота (run_polling сам управляет event loop)
     logger.info("🚀 Запускаем бота...")
-    await application.run_polling(allowed_updates=None, drop_pending_updates=True)
+    application.run_polling(allowed_updates=None, drop_pending_updates=True)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
