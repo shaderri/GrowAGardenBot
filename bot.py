@@ -117,15 +117,20 @@ flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
-    return "Bot is running!", 200
+    return "GAG Stock Tracker Bot is running!", 200
 
 @flask_app.route('/health')
 def health():
     return "OK", 200
 
 def run_flask():
-    port = int(os.environ.get('PORT', 10000))
-    flask_app.run(host='0.0.0.0', port=port)
+    """Запуск Flask в отдельном потоке"""
+    try:
+        port = int(os.environ.get('PORT', 10000))
+        logger.info(f"🌐 Запуск Flask на порту {port}")
+        flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    except Exception as e:
+        logger.error(f"❌ Ошибка запуска Flask: {e}")
 
 # ========== УТИЛИТЫ ==========
 def get_moscow_time() -> datetime:
