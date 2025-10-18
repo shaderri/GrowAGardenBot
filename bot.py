@@ -125,8 +125,10 @@ ITEMS_DATA.update({k: {**v, "category": "egg"} for k, v in EGGS_DATA.items()})
 last_stock_state: Dict[str, int] = {}
 user_autostocks_cache: Dict[int, Set[str]] = {}
 user_autostocks_time: Dict[int, datetime] = {}
+user_cooldowns: Dict[int, Dict[str, datetime]] = {}
 AUTOSTOCK_CACHE_TTL = 120
 MAX_CACHE_SIZE = 10000
+COMMAND_COOLDOWN = 15  # Кулдаун 15 секунд
 
 NAME_TO_ID: Dict[str, str] = {}
 ID_TO_NAME: Dict[str, str] = {}
@@ -194,6 +196,23 @@ def _cleanup_cache():
             user_autostocks_time.pop(user_id, None)
         
         logger.info(f"♻️ Очищено {len(to_delete)} записей из кэша")
+
+def check_command_cooldown(user_id: int, command: str) -> tuple[bool, Optional[int]]:
+    """Проверка кулдауна команды"""
+    if user_id not in user_cooldowns:
+        user_cooldowns[user_id] = {}
+    
+    if command in user_cooldowns[user_id]:
+        last_time = user_cooldowns[user_id][command]
+        now = get_moscow_time()
+        elapsed = (now - last_time).total_seconds()
+        
+        if elapsed < COMMAND_COOLDOWN:
+            seconds_left = int(COMMAND_COOLDOWN - elapsed)
+            return False, seconds_left
+    
+    user_cooldowns[user_id][command] = get_moscow_time()
+    return True, None
 
 # ========== БАЗА ДАННЫХ ==========
 class SupabaseDB:
@@ -333,7 +352,35 @@ class StockTracker:
             logger.error(f"❌ Ошибка погоды: {e}")
             return None
 
-    def format_stock_message(self, seeds, gear, eggs) -> str:
+    def format_weather_message(self, weather) -> str:
+        current_time = get_moscow_time().strftime("%H:%M:%S")
+        message = "🌤️ *ПОГОДА В ИГРЕ*\n\n"
+        
+        if weather and isinstance(weather, dict):
+            weather_type = weather.get('type', 'normal')
+            is_active = weather.get('active', False)
+            
+            if is_active and weather_type != 'normal':
+                # Активная специальная погода
+                weather_names = {
+                    'gold': '🌟 Золотая',
+                    'diamond': '💎 Алмазная',
+                    'frozen': '❄️ Ледяная',
+                    'neon': '🌈 Неоновая',
+                    'rainbow': '🌈 Радужная',
+                    'magma': '🌋 Магма',
+                    'galaxy': '🌌 Галактика'
+                }
+                weather_name = weather_names.get(weather_type, f'🌤️ {weather_type.capitalize()}')
+                message += f"{weather_name} погода"
+            else:
+                # Погоды нет
+                message += "_Сейчас погоды нет_"
+        else:
+            message += "_Сейчас погоды нет_"
+        
+        message += f"\n\n🕒 {current_time} МСК"
+        return message
         current_time = get_moscow_time().strftime("%H:%M:%S")
         message = "📊 *ТЕКУЩИЙ СТОК*\n\n"
         
@@ -423,6 +470,44 @@ class StockTracker:
             logger.info(f"✅ Уведомление: {item_name} x{count}")
         except Exception as e:
             logger.error(f"❌ Ошибка отправки: {e}")
+    
+    async def send_autostock_notification(self, bot: Bot, user_id: int, item_name: str, count: int):
+        """Отправка уведомления об автостоке"""
+        try:
+            item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "Unknown"})
+            current_time = get_moscow_time().strftime("%H:%M:%S")
+
+            message = (
+                f"🔔 *АВТОСТОК - {item_name}\\!*\n\n"
+                f"{item_info['emoji']} *{item_name}*\n"
+                f"📦 Количество: *x{count}*\n"
+                f"💰 Цена: {item_info['price']} ¢\n\n"
+                f"🕒 {current_time} МСК"
+            )
+
+            await bot.send_message(chat_id=user_id, text=message, parse_mode=ParseMode.MARKDOWN)
+        except:
+            pass
+    
+    async def check_user_autostocks(self, seeds, bot: Bot):
+        """Проверка автостоков пользователей"""
+        if not seeds:
+            return
+
+        current_stock = {item.get('name', ''): item.get('quantity', 0) for item in seeds if item.get('name')}
+
+        for item_name, count in current_stock.items():
+            if count > 0:
+                try:
+                    users = await self.db.get_users_tracking_item(item_name)
+                    for user_id in users:
+                        try:
+                            await self.send_autostock_notification(bot, user_id, item_name, count)
+                            await asyncio.sleep(0.05)  # 50ms задержка
+                        except:
+                            pass
+                except:
+                    pass
 
 tracker = StockTracker()
 
@@ -445,6 +530,16 @@ async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message:
         return
     
+    user_id = update.effective_user.id
+    
+    # Проверка кулдауна
+    can_execute, seconds_left = check_command_cooldown(user_id, 'stock')
+    if not can_execute:
+        await update.effective_message.reply_text(
+            f"⏳ Подождите {seconds_left} сек. перед следующим запросом"
+        )
+        return
+    
     seeds, gear, eggs = await asyncio.gather(
         tracker.fetch_seeds(),
         tracker.fetch_gear(),
@@ -458,12 +553,32 @@ async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message:
         return
     
+    user_id = update.effective_user.id
+    
+    # Проверка кулдауна
+    can_execute, seconds_left = check_command_cooldown(user_id, 'weather')
+    if not can_execute:
+        await update.effective_message.reply_text(
+            f"⏳ Подождите {seconds_left} сек. перед следующим запросом"
+        )
+        return
+    
     weather = await tracker.fetch_weather()
     message = tracker.format_weather_message(weather)
     await update.effective_message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
 async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message:
+        return
+    
+    user_id = update.effective_user.id
+    
+    # Проверка кулдауна
+    can_execute, seconds_left = check_command_cooldown(user_id, 'autostock')
+    if not can_execute:
+        await update.effective_message.reply_text(
+            f"⏳ Подождите {seconds_left} сек. перед следующим запросом"
+        )
         return
     
     keyboard = [
@@ -643,6 +758,7 @@ async def periodic_stock_check(application: Application):
                 
                 if seeds and CHANNEL_ID:
                     await tracker.check_for_notifications(seeds, application.bot, CHANNEL_ID)
+                    await tracker.check_user_autostocks(seeds, application.bot)
                 
                 sleep_time = calculate_sleep_time()
                 await asyncio.sleep(sleep_time)
