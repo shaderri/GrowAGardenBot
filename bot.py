@@ -3,22 +3,25 @@ import aiohttp
 import logging
 import os
 import json
+import hashlib
 import threading
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List, Set
 from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 from telegram.constants import ParseMode
-from dotenv import load_dotenv
-from flask import Flask
+from telegram.error import TelegramError
+from flask import Flask, jsonify, request as flask_request
 import pytz
+from dotenv import load_dotenv
 
-# Загружаем переменные окружения
 load_dotenv()
 
 # ========== КОНФИГУРАЦИЯ ==========
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@GroowAGarden")
+
+# Supabase для автостоков
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://tcsmfiixhflzrxkrbslk.supabase.co")
 SUPABASE_API_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjc21maWl4aGZsenJ4a3Jic2xrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MDUzOTYsImV4cCI6MjA3NjA4MTM5Nn0.VcAK7QYvUFuKd96OgOdadS2s_9N08pYt9mMIu73Jeiw")
 
@@ -33,10 +36,23 @@ EGGS_API = f"{GAG_API_BASE}/eggs"
 WEATHER_API = f"{GAG_API_BASE}/weather"
 
 CHECK_INTERVAL_MINUTES = 5
-AUTOSTOCK_CACHE_TTL = 60
+CHECK_DELAY_SECONDS = 10
 
-# Два самых редких семена для уведомлений в канал
+# Редкие предметы для канала
 RAREST_SEEDS = ["Crimson Thorn", "Great Pumpkin"]
+
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN не установлен!")
+
+# ========== ЛОГИРОВАНИЕ ==========
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+logger.info(f"🔗 Supabase: {SUPABASE_URL}")
+logger.info(f"🔗 API: {GAG_API_BASE}")
 
 # ========== ДАННЫЕ ПРЕДМЕТОВ ==========
 SEEDS_DATA = {
@@ -100,50 +116,87 @@ EGGS_DATA = {
     "Jungle Egg": {"emoji": "🦜", "price": "60,000,000"},
 }
 
-# ========== КЭШИРОВАНИЕ ==========
+ITEMS_DATA = {}
+ITEMS_DATA.update({k: {**v, "category": "seed"} for k, v in SEEDS_DATA.items()})
+ITEMS_DATA.update({k: {**v, "category": "gear"} for k, v in GEAR_DATA.items()})
+ITEMS_DATA.update({k: {**v, "category": "egg"} for k, v in EGGS_DATA.items()})
+
+# ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
+last_stock_state: Dict[str, int] = {}
 user_autostocks_cache: Dict[int, Set[str]] = {}
 user_autostocks_time: Dict[int, datetime] = {}
-last_stock_state: Dict[str, int] = {}
+AUTOSTOCK_CACHE_TTL = 120
+MAX_CACHE_SIZE = 10000
 
-# ========== ЛОГИРОВАНИЕ ==========
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+NAME_TO_ID: Dict[str, str] = {}
+ID_TO_NAME: Dict[str, str] = {}
 
-# ========== FLASK ДЛЯ UPTIME ROBOT ==========
-flask_app = Flask(__name__)
+SEED_ITEMS_LIST = [(name, info) for name, info in ITEMS_DATA.items() if info['category'] == 'seed']
+GEAR_ITEMS_LIST = [(name, info) for name, info in ITEMS_DATA.items() if info['category'] == 'gear']
+EGG_ITEMS_LIST = [(name, info) for name, info in ITEMS_DATA.items() if info['category'] == 'egg']
 
-@flask_app.route('/')
-def home():
-    return "GAG Stock Tracker Bot is running!", 200
-
-@flask_app.route('/health')
-def health():
-    return "OK", 200
-
-def run_flask():
-    """Запуск Flask в отдельном потоке"""
-    try:
-        port = int(os.environ.get('PORT', 10000))
-        logger.info(f"🌐 Запуск Flask на порту {port}")
-        flask_app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
-    except Exception as e:
-        logger.error(f"❌ Ошибка запуска Flask: {e}")
+telegram_app: Optional[Application] = None
 
 # ========== УТИЛИТЫ ==========
 def get_moscow_time() -> datetime:
-    """Получить текущее московское время"""
     return datetime.now(pytz.timezone('Europe/Moscow'))
 
-def format_moscow_time() -> str:
-    """Форматировать московское время"""
-    return get_moscow_time().strftime('%H:%M:%S')
-
-class SupabaseDB:
-    """Работа с Supabase для автостоков"""
+def get_next_check_time() -> datetime:
+    now = get_moscow_time()
+    current_minute = now.minute
     
+    next_minute = ((current_minute // CHECK_INTERVAL_MINUTES) + 1) * CHECK_INTERVAL_MINUTES
+    
+    if next_minute >= 60:
+        next_check = now.replace(minute=0, second=CHECK_DELAY_SECONDS, microsecond=0) + timedelta(hours=1)
+    else:
+        next_check = now.replace(minute=next_minute, second=CHECK_DELAY_SECONDS, microsecond=0)
+    
+    if next_check <= now:
+        next_check += timedelta(minutes=CHECK_INTERVAL_MINUTES)
+    
+    return next_check
+
+def calculate_sleep_time() -> float:
+    next_check = get_next_check_time()
+    now = get_moscow_time()
+    sleep_seconds = (next_check - now).total_seconds()
+    return max(sleep_seconds, 0)
+
+def build_item_id_mappings():
+    global NAME_TO_ID, ID_TO_NAME
+    NAME_TO_ID.clear()
+    ID_TO_NAME.clear()
+    
+    for item_name in ITEMS_DATA.keys():
+        hash_obj = hashlib.sha1(item_name.encode('utf-8'))
+        hash_hex = hash_obj.hexdigest()[:8]
+        category = ITEMS_DATA[item_name]['category']
+        safe_id = f"t_{category}_{hash_hex}"
+        
+        NAME_TO_ID[item_name] = safe_id
+        ID_TO_NAME[safe_id] = item_name
+        
+    logger.info(f"✅ Построены маппинги: {len(NAME_TO_ID)} предметов")
+
+def _cleanup_cache():
+    global user_autostocks_cache, user_autostocks_time
+    
+    if len(user_autostocks_cache) > MAX_CACHE_SIZE:
+        now = get_moscow_time()
+        to_delete = []
+        for user_id, cache_time in user_autostocks_time.items():
+            if (now - cache_time).total_seconds() > 300:
+                to_delete.append(user_id)
+        
+        for user_id in to_delete:
+            user_autostocks_cache.pop(user_id, None)
+            user_autostocks_time.pop(user_id, None)
+        
+        logger.info(f"♻️ Очищено {len(to_delete)} записей из кэша")
+
+# ========== БАЗА ДАННЫХ ==========
+class SupabaseDB:
     def __init__(self):
         self.session: Optional[aiohttp.ClientSession] = None
         self.headers = {
@@ -155,16 +208,13 @@ class SupabaseDB:
     
     async def init_session(self):
         if not self.session or self.session.closed:
-            self.session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=20, connect=10, sock_read=10)
-            )
+            self.session = aiohttp.ClientSession()
     
     async def close_session(self):
         if self.session and not self.session.closed:
             await self.session.close()
     
     async def load_user_autostocks(self, user_id: int, use_cache: bool = True) -> Set[str]:
-        """Загрузка автостоков с кэшированием (TTL 60 сек)"""
         if use_cache and user_id in user_autostocks_cache:
             cache_time = user_autostocks_time.get(user_id)
             if cache_time:
@@ -191,7 +241,6 @@ class SupabaseDB:
             return set()
     
     async def save_user_autostock(self, user_id: int, item_name: str) -> bool:
-        """Сохранение автостока"""
         if user_id not in user_autostocks_cache:
             user_autostocks_cache[user_id] = set()
         user_autostocks_cache[user_id].add(item_name)
@@ -208,7 +257,6 @@ class SupabaseDB:
             return False
     
     async def remove_user_autostock(self, user_id: int, item_name: str) -> bool:
-        """Удаление автостока"""
         if user_id in user_autostocks_cache:
             user_autostocks_cache[user_id].discard(item_name)
             user_autostocks_time[user_id] = get_moscow_time()
@@ -224,7 +272,6 @@ class SupabaseDB:
             return False
     
     async def get_users_tracking_item(self, item_name: str) -> List[int]:
-        """Получить пользователей, отслеживающих предмет"""
         try:
             await self.init_session()
             params = {"item_name": f"eq.{item_name}", "select": "user_id"}
@@ -238,24 +285,23 @@ class SupabaseDB:
             logger.error(f"❌ Ошибка получения пользователей: {e}")
             return []
 
+# ========== ТРЕКЕР СТОКА ==========
 class StockTracker:
-    """Отслеживание стока игры"""
-    
     def __init__(self):
         self.session: Optional[aiohttp.ClientSession] = None
+        self.is_running = False
         self.db = SupabaseDB()
-    
+
     async def init_session(self):
         if not self.session or self.session.closed:
             self.session = aiohttp.ClientSession()
-    
+
     async def close_session(self):
         if self.session and not self.session.closed:
             await self.session.close()
         await self.db.close_session()
-    
+
     async def fetch_api(self, url: str) -> Optional[List[Dict]]:
-        """Запрос к API игры"""
         try:
             await self.init_session()
             async with self.session.get(url, timeout=10) as response:
@@ -265,331 +311,429 @@ class StockTracker:
         except Exception as e:
             logger.error(f"❌ Ошибка API: {e}")
             return None
-    
+
     async def fetch_seeds(self) -> Optional[List[Dict]]:
-        """Получение стока семян"""
         return await self.fetch_api(SEEDS_API)
-    
+
     async def fetch_gear(self) -> Optional[List[Dict]]:
-        """Получение стока гира"""
         return await self.fetch_api(GEAR_API)
-    
-    async def fetch_cosmetics(self) -> Optional[List[Dict]]:
-        """Получение стока косметики"""
-        return await self.fetch_api(COSMETICS_API)
-    
+
     async def fetch_eggs(self) -> Optional[List[Dict]]:
-        """Получение стока яиц"""
         return await self.fetch_api(EGGS_API)
-    
+
     async def fetch_weather(self) -> Optional[Dict]:
-        """Получение погоды"""
         try:
             await self.init_session()
             async with self.session.get(WEATHER_API, timeout=10) as response:
                 if response.status == 200:
                     data = await response.json()
-                    # Возвращаем весь объект, а не список
-                    return data
+                    return data if isinstance(data, dict) else None
                 return None
         except Exception as e:
-            logger.error(f"❌ Ошибка API погоды: {e}")
+            logger.error(f"❌ Ошибка погоды: {e}")
             return None
 
+    def format_stock_message(self, seeds, gear, eggs) -> str:
+        current_time = get_moscow_time().strftime("%H:%M:%S")
+        message = "📊 *ТЕКУЩИЙ СТОК*\n\n"
+        
+        if seeds:
+            message += "🌱 *СЕМЕНА:*\n"
+            for item in seeds:
+                name = item.get('name', '')
+                quantity = item.get('quantity', 0)
+                if name in SEEDS_DATA:
+                    data = SEEDS_DATA[name]
+                    message += f"{data['emoji']} {name} x{quantity}\n"
+            message += "\n"
+        else:
+            message += "🌱 *СЕМЕНА:* _Пусто_\n\n"
+        
+        if gear:
+            message += "⚔️ *ГИРЫ:*\n"
+            for item in gear:
+                name = item.get('name', '')
+                quantity = item.get('quantity', 0)
+                if name in GEAR_DATA:
+                    data = GEAR_DATA[name]
+                    message += f"{data['emoji']} {name} x{quantity}\n"
+            message += "\n"
+        else:
+            message += "⚔️ *ГИРЫ:* _Пусто_\n\n"
+        
+        if eggs:
+            message += "🥚 *ЯЙЦА:*\n"
+            for item in eggs:
+                name = item.get('name', '')
+                quantity = item.get('quantity', 0)
+                if name in EGGS_DATA:
+                    data = EGGS_DATA[name]
+                    message += f"{data['emoji']} {name} x{quantity}\n"
+        else:
+            message += "🥚 *ЯЙЦА:* _Пусто_"
+        
+        message += f"\n\n🕒 {current_time} МСК"
+        return message
+
+    def format_weather_message(self, weather) -> str:
+        current_time = get_moscow_time().strftime("%H:%M:%S")
+        message = "🌤️ *ПОГОДА В ИГРЕ*\n\n"
+        
+        if weather and isinstance(weather, dict):
+            current = weather.get('current', 'Неизвестно')
+            upcoming = weather.get('upcoming', 'Неизвестно')
+            message += f"Текущая: {current}\n"
+            message += f"Следующая: {upcoming}"
+        else:
+            message += "_Данные недоступны_"
+        
+        message += f"\n\n🕒 {current_time} МСК"
+        return message
+
+    async def check_for_notifications(self, seeds, bot: Bot, channel_id: str):
+        global last_stock_state
+        if not seeds or not channel_id:
+            return
+
+        current_stock = {item.get('name', ''): item.get('quantity', 0) for item in seeds if item.get('name')}
+
+        for item_name in RAREST_SEEDS:
+            current_count = current_stock.get(item_name, 0)
+            previous_count = last_stock_state.get(item_name, 0)
+            
+            if current_count > 0 and previous_count == 0:
+                await self.send_notification(bot, channel_id, item_name, current_count)
+
+        last_stock_state = current_stock.copy()
+
+    async def send_notification(self, bot: Bot, channel_id: str, item_name: str, count: int):
+        try:
+            item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "Unknown"})
+            current_time = get_moscow_time().strftime("%H:%M:%S")
+
+            message = (
+                f"🚨 *РЕДКИЙ ПРЕДМЕТ В СТОКЕ\\!* 🚨\n\n"
+                f"{item_info['emoji']} *{item_name}*\n"
+                f"📦 Количество: *x{count}*\n"
+                f"💰 Цена: {item_info['price']} ¢\n\n"
+                f"🕒 {current_time} МСК"
+            )
+
+            await bot.send_message(chat_id=channel_id, text=message, parse_mode=ParseMode.MARKDOWN)
+            logger.info(f"✅ Уведомление: {item_name} x{count}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки: {e}")
+
 tracker = StockTracker()
-db = SupabaseDB()
 
 # ========== КОМАНДЫ БОТА ==========
-
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /start"""
-    welcome = (
-        "🌱 *Добро пожаловать в GAG Stock Tracker\\!*\n\n"
-        "Я помогу вам отслеживать сток семян, гира, косметики и яиц\\.\n\n"
-        "📖 *Доступные команды:*\n"
-        "🌱 /stock \\- Текущий сток\n"
-        "✨ /cosmetic \\- Косметика\n"
-        "🌤️ /weather \\- Погода\n"
-        "🔔 /autostock \\- Управление автостоками\n"
-        "❓ /help \\- Справка"
+    if not update.effective_message:
+        return
+    
+    welcome_message = (
+        "👋 *GAG Stock Tracker!*\n\n"
+        "📊 /stock - Текущий сток\n"
+        "🌤️ /weather - Погода\n"
+        "🔔 /autostock - Автостоки\n"
+        "❓ /help - Справка\n\n"
+        f"📢 Канал: {CHANNEL_ID}"
     )
-    await update.message.reply_text(welcome, parse_mode="MarkdownV2")
+    await update.effective_message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
 
 async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /stock - просмотр текущего стока"""
-    seeds = await tracker.fetch_seeds()
-    gear = await tracker.fetch_gear()
-    eggs = await tracker.fetch_eggs()
+    if not update.effective_message:
+        return
     
-    current_time = format_moscow_time()
-    message = "📊 *ТЕКУЩИЙ СТОК*\n\n"
+    seeds, gear, eggs = await asyncio.gather(
+        tracker.fetch_seeds(),
+        tracker.fetch_gear(),
+        tracker.fetch_eggs()
+    )
     
-    # Семена
-    if seeds:
-        message += "🌱 *СЕМЕНА:*\n"
-        for item in seeds:
-            name = item.get('name', '')
-            quantity = item.get('quantity', 0)
-            if name in SEEDS_DATA:
-                data = SEEDS_DATA[name]
-                message += f"{data['emoji']} {name} x{quantity}\n"
-        message += "\n"
-    else:
-        message += "🌱 *СЕМЕНА:* _Пусто_\n\n"
-    
-    # Гиры
-    if gear:
-        message += "⚔️ *ГИРЫ:*\n"
-        for item in gear:
-            name = item.get('name', '')
-            quantity = item.get('quantity', 0)
-            if name in GEAR_DATA:
-                data = GEAR_DATA[name]
-                message += f"{data['emoji']} {name} x{quantity}\n"
-        message += "\n"
-    else:
-        message += "⚔️ *ГИРЫ:* _Пусто_\n\n"
-    
-    # Яйца
-    if eggs:
-        message += "🥚 *ЯЙЦА:*\n"
-        for item in eggs:
-            name = item.get('name', '')
-            quantity = item.get('quantity', 0)
-            if name in EGGS_DATA:
-                data = EGGS_DATA[name]
-                message += f"{data['emoji']} {name} x{quantity}\n"
-    else:
-        message += "🥚 *ЯЙЦА:* _Пусто_"
-    
-    message += f"\n\n🕒 {current_time} МСК"
-    
-    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
-
-async def cosmetic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /cosmetic - просмотр косметики"""
-    cosmetics = await tracker.fetch_cosmetics()
-    current_time = format_moscow_time()
-    
-    message = "✨ *СТОК КОСМЕТИКИ*\n\n"
-    
-    if cosmetics:
-        for item in cosmetics:
-            name = item.get('name', '')
-            quantity = item.get('quantity', 0)
-            message += f"🎨 {name} x{quantity}\n"
-    else:
-        message += "_Пусто_"
-    
-    message += f"\n\n🕒 {current_time} МСК"
-    
-    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+    message = tracker.format_stock_message(seeds, gear, eggs)
+    await update.effective_message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
 async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /weather - просмотр погоды"""
+    if not update.effective_message:
+        return
+    
     weather = await tracker.fetch_weather()
-    current_time = format_moscow_time()
-    
-    message = "🌤️ *ПОГОДА В ИГРЕ*\n\n"
-    
-    if weather and isinstance(weather, dict):
-        current = weather.get('current', 'Неизвестно')
-        upcoming = weather.get('upcoming', 'Неизвестно')
-        message += f"Текущая: {current}\n"
-        message += f"Следующая: {upcoming}"
-    else:
-        message += "_Данные недоступны_"
-    
-    message += f"\n\n🕒 {current_time} МСК"
-    
-    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+    message = tracker.format_weather_message(weather)
+    await update.effective_message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
 async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /autostock - управление автостоками с кнопками"""
-    user_id = update.effective_user.id
-    user_items = await db.load_user_autostocks(user_id, use_cache=False)
+    if not update.effective_message:
+        return
     
-    # Создаем кнопки для семян
-    keyboard = []
-    for name, data in sorted(SEEDS_DATA.items()):
-        is_selected = name in user_items
-        symbol = "✅" if is_selected else "➕"
-        keyboard.append([InlineKeyboardButton(
-            f"{symbol} {data['emoji']} {name}",
-            callback_data=f"autostock_seed_{name}"
-        )])
-    
-    # Добавляем переключатель на гиры
-    keyboard.append([InlineKeyboardButton("⚔️ ГИРЫ →", callback_data="autostock_show_gear")])
-    
+    keyboard = [
+        [InlineKeyboardButton("🌱 Семена", callback_data="as_seeds")],
+        [InlineKeyboardButton("⚔️ Гиры", callback_data="as_gear")],
+        [InlineKeyboardButton("🥚 Яйца", callback_data="as_eggs")],
+        [InlineKeyboardButton("📋 Мои автостоки", callback_data="as_list")],
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     message = (
         "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
-        "🌱 *СЕМЕНА*\n"
-        "Выберите предметы для отслеживания:\n"
-        "➕ - добавить\n"
-        "✅ - уже отслеживается"
+        "Выберите категорию предметов.\n"
+        "⏰ Проверка: каждые 5 минут"
     )
     
-    await update.message.reply_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    await update.effective_message.reply_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
 async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка нажатий на кнопки автостоков"""
     query = update.callback_query
     await query.answer()
     
-    user_id = query.from_user.id
+    user_id = update.effective_user.id
     data = query.data
     
-    if data == "autostock_show_gear":
-        # Показать гиры
-        user_items = await db.load_user_autostocks(user_id, use_cache=False)
-        keyboard = []
-        for name, gear_data in sorted(GEAR_DATA.items()):
-            is_selected = name in user_items
-            symbol = "✅" if is_selected else "➕"
-            keyboard.append([InlineKeyboardButton(
-                f"{symbol} {gear_data['emoji']} {name}",
-                callback_data=f"autostock_gear_{name}"
-            )])
+    try:
+        if data == "as_seeds":
+            user_items = await tracker.db.load_user_autostocks(user_id, use_cache=True)
+            keyboard = []
+            for item_name, item_info in SEED_ITEMS_LIST:
+                is_tracking = item_name in user_items
+                status = "✅" if is_tracking else "➕"
+                safe_callback = NAME_TO_ID.get(item_name, "invalid")
+                keyboard.append([InlineKeyboardButton(
+                    f"{status} {item_info['emoji']} {item_name}",
+                    callback_data=safe_callback
+                )])
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("🌱 *СЕМЕНА*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         
-        keyboard.append([InlineKeyboardButton("🥚 ЯЙЦА →", callback_data="autostock_show_eggs")])
-        keyboard.append([InlineKeyboardButton("← 🌱 СЕМЕНА", callback_data="autostock_show_seeds")])
+        elif data == "as_gear":
+            user_items = await tracker.db.load_user_autostocks(user_id, use_cache=True)
+            keyboard = []
+            for item_name, item_info in GEAR_ITEMS_LIST:
+                is_tracking = item_name in user_items
+                status = "✅" if is_tracking else "➕"
+                safe_callback = NAME_TO_ID.get(item_name, "invalid")
+                keyboard.append([InlineKeyboardButton(
+                    f"{status} {item_info['emoji']} {item_name}",
+                    callback_data=safe_callback
+                )])
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("⚔️ *ГИРЫ*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        message = (
-            "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
-            "⚔️ *ГИРЫ*\n"
-            "Выберите предметы для отслеживания:\n"
-            "➕ - добавить\n"
-            "✅ - уже отслеживается"
-        )
-        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        elif data == "as_eggs":
+            user_items = await tracker.db.load_user_autostocks(user_id, use_cache=True)
+            keyboard = []
+            for item_name, item_info in EGG_ITEMS_LIST:
+                is_tracking = item_name in user_items
+                status = "✅" if is_tracking else "➕"
+                safe_callback = NAME_TO_ID.get(item_name, "invalid")
+                keyboard.append([InlineKeyboardButton(
+                    f"{status} {item_info['emoji']} {item_name}",
+                    callback_data=safe_callback
+                )])
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("🥚 *ЯЙЦА*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        
+        elif data == "as_list":
+            user_items = await tracker.db.load_user_autostocks(user_id, use_cache=True)
+            if not user_items:
+                message = "📋 *МОИ АВТОСТОКИ*\n\n_Нет отслеживаемых предметов_"
+            else:
+                items_list = []
+                for item_name in user_items:
+                    item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "Unknown"})
+                    items_list.append(f"{item_info['emoji']} {item_name} ({item_info['price']} ¢)")
+                message = f"📋 *МОИ АВТОСТОКИ*\n\n" + "\n".join(items_list)
+            
+            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="as_back")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        
+        elif data == "as_back":
+            keyboard = [
+                [InlineKeyboardButton("🌱 Семена", callback_data="as_seeds")],
+                [InlineKeyboardButton("⚔️ Гиры", callback_data="as_gear")],
+                [InlineKeyboardButton("🥚 Яйца", callback_data="as_eggs")],
+                [InlineKeyboardButton("📋 Мои автостоки", callback_data="as_list")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            message = "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\nВыберите категорию."
+            await query.edit_message_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        
+        elif data.startswith("t_"):
+            item_name = ID_TO_NAME.get(data)
+            if not item_name:
+                return
+            
+            category = ITEMS_DATA.get(item_name, {}).get('category', 'seed')
+            user_items = await tracker.db.load_user_autostocks(user_id, use_cache=True)
+            
+            if item_name in user_items:
+                user_items.discard(item_name)
+                asyncio.create_task(tracker.db.remove_user_autostock(user_id, item_name))
+            else:
+                user_items.add(item_name)
+                asyncio.create_task(tracker.db.save_user_autostock(user_id, item_name))
+            
+            if category == 'seed':
+                items_list = SEED_ITEMS_LIST
+            elif category == 'gear':
+                items_list = GEAR_ITEMS_LIST
+            else:
+                items_list = EGG_ITEMS_LIST
+            
+            keyboard = []
+            for name, info in items_list:
+                is_tracking = name in user_items
+                status = "✅" if is_tracking else "➕"
+                safe_callback = NAME_TO_ID.get(name, "invalid")
+                keyboard.append([InlineKeyboardButton(
+                    f"{status} {info['emoji']} {name}",
+                    callback_data=safe_callback
+                )])
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            try:
+                await query.edit_message_reply_markup(reply_markup=reply_markup)
+            except TelegramError:
+                pass
     
-    elif data == "autostock_show_eggs":
-        # Показать яйца
-        user_items = await db.load_user_autostocks(user_id, use_cache=False)
-        keyboard = []
-        for name, egg_data in sorted(EGGS_DATA.items()):
-            is_selected = name in user_items
-            symbol = "✅" if is_selected else "➕"
-            keyboard.append([InlineKeyboardButton(
-                f"{symbol} {egg_data['emoji']} {name}",
-                callback_data=f"autostock_egg_{name}"
-            )])
-        
-        keyboard.append([InlineKeyboardButton("← ⚔️ ГИРЫ", callback_data="autostock_show_gear")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        message = (
-            "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
-            "🥚 *ЯЙЦА*\n"
-            "Выберите предметы для отслеживания:\n"
-            "➕ - добавить\n"
-            "✅ - уже отслеживается"
-        )
-        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    
-    elif data == "autostock_show_seeds":
-        # Показать семена
-        user_items = await db.load_user_autostocks(user_id, use_cache=False)
-        keyboard = []
-        for name, seed_data in sorted(SEEDS_DATA.items()):
-            is_selected = name in user_items
-            symbol = "✅" if is_selected else "➕"
-            keyboard.append([InlineKeyboardButton(
-                f"{symbol} {seed_data['emoji']} {name}",
-                callback_data=f"autostock_seed_{name}"
-            )])
-        
-        keyboard.append([InlineKeyboardButton("⚔️ ГИРЫ →", callback_data="autostock_show_gear")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        message = (
-            "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
-            "🌱 *СЕМЕНА*\n"
-            "Выберите предметы для отслеживания:\n"
-            "➕ - добавить\n"
-            "✅ - уже отслеживается"
-        )
-        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    
-    elif data.startswith("autostock_seed_"):
-        item_name = data.replace("autostock_seed_", "")
-        await toggle_autostock(query, user_id, item_name, "seed")
-    
-    elif data.startswith("autostock_gear_"):
-        item_name = data.replace("autostock_gear_", "")
-        await toggle_autostock(query, user_id, item_name, "gear")
-    
-    elif data.startswith("autostock_egg_"):
-        item_name = data.replace("autostock_egg_", "")
-        await toggle_autostock(query, user_id, item_name, "egg")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в autostock_callback: {e}")
 
-async def toggle_autostock(query, user_id: int, item_name: str, item_type: str):
-    """Переключение автостока (добавить/удалить)"""
-    user_items = await db.load_user_autostocks(user_id, use_cache=False)
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
     
-    if item_name in user_items:
-        # Удалить
-        await db.remove_user_autostock(user_id, item_name)
-    else:
-        # Добавить
-        await db.save_user_autostock(user_id, item_name)
+    help_message = (
+        "📚 *КОМАНДЫ:*\n\n"
+        "/start - Информация\n"
+        "/stock - Текущий сток\n"
+        "/weather - Погода в игре\n"
+        "/autostock - Настроить автостоки\n"
+        "/help - Справка\n\n"
+        "⏰ Проверка каждые 5 минут\n"
+        f"📢 Канал: {CHANNEL_ID}"
+    )
+    await update.effective_message.reply_text(help_message, parse_mode=ParseMode.MARKDOWN)
+
+# ========== ПЕРИОДИЧЕСКАЯ ПРОВЕРКА ==========
+async def periodic_stock_check(application: Application):
+    if tracker.is_running:
+        return
     
-    # Обновляем кнопки
-    user_items = await db.load_user_autostocks(user_id, use_cache=False)
+    tracker.is_running = True
+    logger.info("🚀 Периодическая проверка запущена")
     
-    if item_type == "seed":
-        keyboard = []
-        for name, data in sorted(SEEDS_DATA.items()):
-            is_selected = name in user_items
-            symbol = "✅" if is_selected else "➕"
-            keyboard.append([InlineKeyboardButton(
-                f"{symbol} {data['emoji']} {name}",
-                callback_data=f"autostock_seed_{name}"
-            )])
-        keyboard.append([InlineKeyboardButton("⚔️ ГИРЫ →", callback_data="autostock_show_gear")])
-        message = (
-            "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
-            "🌱 *СЕМЕНА*\n"
-            "Выберите предметы для отслеживания:\n"
-            "➕ - добавить\n"
-            "✅ - уже отслеживается"
-        )
-    elif item_type == "gear":
-        keyboard = []
-        for name, data in sorted(GEAR_DATA.items()):
-            is_selected = name in user_items
-            symbol = "✅" if is_selected else "➕"
-            keyboard.append([InlineKeyboardButton(
-                f"{symbol} {data['emoji']} {name}",
-                callback_data=f"autostock_gear_{name}"
-            )])
-        keyboard.append([InlineKeyboardButton("🥚 ЯЙЦА →", callback_data="autostock_show_eggs")])
-        keyboard.append([InlineKeyboardButton("← 🌱 СЕМЕНА", callback_data="autostock_show_seeds")])
-        message = (
-            "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
-            "⚔️ *ГИРЫ*\n"
-            "Выберите предметы для отслеживания:\n"
-            "➕ - добавить\n"
-            "✅ - уже отслеживается"
-        )
-    else:  # egg
-        keyboard = []
-        for name, data in sorted(EGGS_DATA.items()):
-            is_selected = name in user_items
-            symbol = "✅" if is_selected else "➕"
-            keyboard.append([InlineKeyboardButton(
-                f"{symbol} {data['emoji']} {name}",
-                callback_data=f"autostock_egg_{name}"
-            )])
-        keyboard.append([InlineKeyboardButton("← ⚔️ ГИРЫ", callback_data="autostock_show_gear")])
-        message = (
-            "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
-            "🥚 *ЯЙЦА*\n"
-            "Выберите предметы для отслеживания:\n"
-            "➕ - добавить\n"
-            "✅ - уже отслеживается"
-        )
+    try:
+        initial_sleep = calculate_sleep_time()
+        await asyncio.sleep(initial_sleep)
+
+        while tracker.is_running:
+            try:
+                now = get_moscow_time()
+                logger.info(f"🔍 Проверка - {now.strftime('%H:%M:%S')}")
+                
+                if int(now.timestamp()) % 100 == 0:
+                    _cleanup_cache()
+                
+                seeds = await tracker.fetch_seeds()
+                
+                if seeds and CHANNEL_ID:
+                    await tracker.check_for_notifications(seeds, application.bot, CHANNEL_ID)
+                
+                sleep_time = calculate_sleep_time()
+                await asyncio.sleep(sleep_time)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"❌ Ошибка проверки: {e}")
+                await asyncio.sleep(60)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        tracker.is_running = False
+        logger.info("🛑 Периодическая проверка остановлена")
+
+async def post_init(application: Application):
+    asyncio.create_task(periodic_stock_check(application))
+
+# ========== FLASK ==========
+flask_app = Flask(__name__)
+
+@flask_app.route("/", methods=["GET", "HEAD"])
+@flask_app.route("/ping", methods=["GET", "HEAD"])
+def ping():
+    if flask_request.method == "HEAD":
+        return "", 200
+    
+    now = get_moscow_time()
+    next_check = get_next_check_time()
+    
+    return jsonify({
+        "status": "ok",
+        "time": datetime.utcnow().isoformat() + "Z",
+        "moscow_time": now.strftime("%H:%M:%S"),
+        "next_check": next_check.strftime("%H:%M:%S"),
+        "bot": "GAG Stock Tracker",
+        "is_running": tracker.is_running,
+        "cache_size": len(user_autostocks_cache)
+    }), 200
+
+@flask_app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "healthy", "running": tracker.is_running}), 200
+
+# ========== MAIN ==========
+def main():
+    print("Starting bot.py...")
+    logger.info("="*60)
+    logger.info("🌱 GAG Stock Tracker Bot")
+    logger.info("="*60)
+
+    build_item_id_mappings()
+
+    global telegram_app
+    telegram_app = Application.builder().token(BOT_TOKEN).build()
+
+    telegram_app.add_handler(CommandHandler("start", start_command))
+    telegram_app.add_handler(CommandHandler("stock", stock_command))
+    telegram_app.add_handler(CommandHandler("weather", weather_command))
+    telegram_app.add_handler(CommandHandler("autostock", autostock_command))
+    telegram_app.add_handler(CommandHandler("help", help_command))
+    
+    telegram_app.add_handler(CallbackQueryHandler(autostock_callback, pattern="^as_|^t_"))
+
+    telegram_app.post_init = post_init
+
+    async def shutdown_callback(app: Application):
+        logger.info("🛑 Остановка бота")
+        tracker.is_running = False
+        try:
+            await tracker.close_session()
+        except Exception as e:
+            logger.error(f"❌ Ошибка закрытия: {e}")
+
+    telegram_app.post_shutdown = shutdown_callback
+
+    logger.info("🔄 Режим: Polling")
+    
+    def run_flask_server():
+        port = int(os.getenv("PORT", "10000"))
+        logger.info(f"🚀 Flask запущен на порту {port}")
+        import logging as flask_logging
+        flask_log = flask_logging.getLogger('werkzeug')
+        flask_log.setLevel(flask_logging.ERROR)
+        flask_app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False)
+    
+    flask_thread = threading.Thread(target=run_flask_server, daemon=True)
+    flask_thread.start()
+    
+    logger.info("🚀 Бот запущен!")
+    logger.info("="*60)
+    telegram_app.run_polling(allowed_updates=None, drop_pending_updates=True)
+
+if __name__ == "__main__":
+    main()
