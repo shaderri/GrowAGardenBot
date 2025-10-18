@@ -3,12 +3,14 @@ import aiohttp
 import logging
 import os
 import json
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List, Set
 from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 from telegram.constants import ParseMode
 from dotenv import load_dotenv
+from flask import Flask
 import pytz
 
 load_dotenv()
@@ -16,10 +18,10 @@ load_dotenv()
 # ========== КОНФИГУРАЦИЯ ==========
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@GroowAGarden")
-SUPABASE_URL_BASE = os.getenv("SUPABASE_URL", "https://your-project.supabase.co/rest/v1")
-SUPABASE_API_KEY = os.getenv("SUPABASE_KEY", "your-key")
+SUPABASE_URL = "https://tcsmfiixhflzrxkrbslk.supabase.co"
+SUPABASE_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjc21maWl4aGZsenJ4a3Jic2xrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MDUzOTYsImV4cCI6MjA3NjA4MTM5Nn0.VcAK7QYvUFuKd96OgOdadS2s_9N08pYt9mMIu73Jeiw"
 
-AUTOSTOCKS_URL = f"{SUPABASE_URL_BASE}/user_autostocks_gag"
+AUTOSTOCKS_URL = f"{SUPABASE_URL}/rest/v1/user_autostocks"
 
 # API игры
 GAG_API_BASE = "https://gagapi.onrender.com"
@@ -37,34 +39,34 @@ RAREST_SEEDS = ["Crimson Thorn", "Great Pumpkin"]
 
 # ========== ДАННЫЕ ПРЕДМЕТОВ ==========
 SEEDS_DATA = {
-    "Carrot": {"emoji": "🥕", "price": "10", "rarity": "1 in 1"},
-    "Strawberry": {"emoji": "🍓", "price": "50", "rarity": "1 in 1"},
-    "Blueberry": {"emoji": "🫐", "price": "400", "rarity": "1 in 1"},
-    "Orange Tulip": {"emoji": "🧡", "price": "600", "rarity": "1 in 3"},
-    "Tomato": {"emoji": "🍅", "price": "800", "rarity": "1 in 1"},
-    "Corn": {"emoji": "🌽", "price": "1,300", "rarity": "1 in 6"},
-    "Daffodil": {"emoji": "🌼", "price": "1,000", "rarity": "1 in 7"},
-    "Watermelon": {"emoji": "🍉", "price": "2,500", "rarity": "1 in 8"},
-    "Pumpkin": {"emoji": "🎃", "price": "3,000", "rarity": "1 in 10"},
-    "Apple": {"emoji": "🍎", "price": "3,250", "rarity": "1 in 14"},
-    "Bamboo": {"emoji": "🎋", "price": "4,000", "rarity": "1 in 5"},
-    "Coconut": {"emoji": "🥥", "price": "6,000", "rarity": "1 in 20"},
-    "Cactus": {"emoji": "🌵", "price": "15,000", "rarity": "1 in 30"},
-    "Dragon Fruit": {"emoji": "🐉", "price": "50,000", "rarity": "1 in 50"},
-    "Mango": {"emoji": "🥭", "price": "100,000", "rarity": "1 in 80"},
-    "Grape": {"emoji": "🍇", "price": "850,000", "rarity": "1 in 100"},
-    "Mushroom": {"emoji": "🍄", "price": "150,000", "rarity": "1 in 120"},
-    "Pepper": {"emoji": "🌶️", "price": "1,000,000", "rarity": "1 in 140"},
-    "Cacao": {"emoji": "🍫", "price": "2,500,000", "rarity": "1 in 160"},
-    "Beanstalk": {"emoji": "🪜", "price": "10,000,000", "rarity": "1 in 210"},
-    "Ember Lily": {"emoji": "🔥", "price": "15,000,000", "rarity": "1 in 240"},
-    "Sugar Apple": {"emoji": "🍎", "price": "25,000,000", "rarity": "1 in 290"},
-    "Burning Bud": {"emoji": "🔥", "price": "40,000,000", "rarity": "1 in 340"},
-    "Giant Pinecone": {"emoji": "🌲", "price": "55,000,000", "rarity": "1 in 380"},
-    "Elder Strawberry": {"emoji": "🍓", "price": "70,000,000", "rarity": "1 in 400"},
-    "Romanesco": {"emoji": "🥦", "price": "88,000,000", "rarity": "1 in 440"},
-    "Crimson Thorn": {"emoji": "🌹", "price": "10,000,000,000", "rarity": "1 in 777"},
-    "Great Pumpkin": {"emoji": "🎃", "price": "15,000,000,000", "rarity": "LEGENDARY"},
+    "Carrot": {"emoji": "🥕", "price": "10"},
+    "Strawberry": {"emoji": "🍓", "price": "50"},
+    "Blueberry": {"emoji": "🫐", "price": "400"},
+    "Orange Tulip": {"emoji": "🧡", "price": "600"},
+    "Tomato": {"emoji": "🍅", "price": "800"},
+    "Corn": {"emoji": "🌽", "price": "1,300"},
+    "Daffodil": {"emoji": "🌼", "price": "1,000"},
+    "Watermelon": {"emoji": "🍉", "price": "2,500"},
+    "Pumpkin": {"emoji": "🎃", "price": "3,000"},
+    "Apple": {"emoji": "🍎", "price": "3,250"},
+    "Bamboo": {"emoji": "🎋", "price": "4,000"},
+    "Coconut": {"emoji": "🥥", "price": "6,000"},
+    "Cactus": {"emoji": "🌵", "price": "15,000"},
+    "Dragon Fruit": {"emoji": "🐉", "price": "50,000"},
+    "Mango": {"emoji": "🥭", "price": "100,000"},
+    "Grape": {"emoji": "🍇", "price": "850,000"},
+    "Mushroom": {"emoji": "🍄", "price": "150,000"},
+    "Pepper": {"emoji": "🌶️", "price": "1,000,000"},
+    "Cacao": {"emoji": "🍫", "price": "2,500,000"},
+    "Beanstalk": {"emoji": "🪜", "price": "10,000,000"},
+    "Ember Lily": {"emoji": "🔥", "price": "15,000,000"},
+    "Sugar Apple": {"emoji": "🍎", "price": "25,000,000"},
+    "Burning Bud": {"emoji": "🔥", "price": "40,000,000"},
+    "Giant Pinecone": {"emoji": "🌲", "price": "55,000,000"},
+    "Elder Strawberry": {"emoji": "🍓", "price": "70,000,000"},
+    "Romanesco": {"emoji": "🥦", "price": "88,000,000"},
+    "Crimson Thorn": {"emoji": "🌹", "price": "10,000,000,000"},
+    "Great Pumpkin": {"emoji": "🎃", "price": "15,000,000,000"},
 }
 
 GEAR_DATA = {
@@ -108,6 +110,21 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# ========== FLASK ДЛЯ UPTIME ROBOT ==========
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def home():
+    return "Bot is running!", 200
+
+@flask_app.route('/health')
+def health():
+    return "OK", 200
+
+def run_flask():
+    port = int(os.environ.get('PORT', 10000))
+    flask_app.run(host='0.0.0.0', port=port)
 
 # ========== УТИЛИТЫ ==========
 def get_moscow_time() -> datetime:
@@ -261,7 +278,17 @@ class StockTracker:
     
     async def fetch_weather(self) -> Optional[Dict]:
         """Получение погоды"""
-        return await self.fetch_api(WEATHER_API)
+        try:
+            await self.init_session()
+            async with self.session.get(WEATHER_API, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    # Возвращаем весь объект, а не список
+                    return data
+                return None
+        except Exception as e:
+            logger.error(f"❌ Ошибка API погоды: {e}")
+            return None
 
 tracker = StockTracker()
 db = SupabaseDB()
@@ -299,7 +326,7 @@ async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             quantity = item.get('quantity', 0)
             if name in SEEDS_DATA:
                 data = SEEDS_DATA[name]
-                message += f"{data['emoji']} *{name}* x{quantity}\n"
+                message += f"{data['emoji']} {name} x{quantity}\n"
         message += "\n"
     else:
         message += "🌱 *СЕМЕНА:* _Пусто_\n\n"
@@ -312,7 +339,7 @@ async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             quantity = item.get('quantity', 0)
             if name in GEAR_DATA:
                 data = GEAR_DATA[name]
-                message += f"{data['emoji']} *{name}* x{quantity}\n"
+                message += f"{data['emoji']} {name} x{quantity}\n"
         message += "\n"
     else:
         message += "⚔️ *ГИРЫ:* _Пусто_\n\n"
@@ -325,7 +352,7 @@ async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             quantity = item.get('quantity', 0)
             if name in EGGS_DATA:
                 data = EGGS_DATA[name]
-                message += f"{data['emoji']} *{name}* x{quantity}\n"
+                message += f"{data['emoji']} {name} x{quantity}\n"
     else:
         message += "🥚 *ЯЙЦА:* _Пусто_"
     
@@ -344,7 +371,7 @@ async def cosmetic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for item in cosmetics:
             name = item.get('name', '')
             quantity = item.get('quantity', 0)
-            message += f"🎨 *{name}* x{quantity}\n"
+            message += f"🎨 {name} x{quantity}\n"
     else:
         message += "_Пусто_"
     
@@ -359,12 +386,11 @@ async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     message = "🌤️ *ПОГОДА В ИГРЕ*\n\n"
     
-    if weather and isinstance(weather, list) and len(weather) > 0:
-        weather_data = weather[0]
-        current = weather_data.get('current', 'Неизвестно')
-        upcoming = weather_data.get('upcoming', 'Неизвестно')
-        message += f"*Текущая:* {current}\n"
-        message += f"*Следующая:* {upcoming}"
+    if weather and isinstance(weather, dict):
+        current = weather.get('current', 'Неизвестно')
+        upcoming = weather.get('upcoming', 'Неизвестно')
+        message += f"Текущая: {current}\n"
+        message += f"Следующая: {upcoming}"
     else:
         message += "_Данные недоступны_"
     
@@ -373,281 +399,191 @@ async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
 async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /autostock - управление автостоками"""
+    """Команда /autostock - управление автостоками с кнопками"""
     user_id = update.effective_user.id
-    user_items = await db.load_user_autostocks(user_id, use_cache=True)
-    current_time = format_moscow_time()
+    user_items = await db.load_user_autostocks(user_id, use_cache=False)
     
-    message = "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
+    # Создаем кнопки для семян
+    keyboard = []
+    for name, data in sorted(SEEDS_DATA.items()):
+        is_selected = name in user_items
+        symbol = "✅" if is_selected else "➕"
+        keyboard.append([InlineKeyboardButton(
+            f"{symbol} {data['emoji']} {name}",
+            callback_data=f"autostock_seed_{name}"
+        )])
     
-    if user_items:
-        message += "📋 *Ваши отслеживаемые предметы:*\n"
-        for item_name in sorted(user_items):
-            if item_name in SEEDS_DATA:
-                emoji = SEEDS_DATA[item_name]['emoji']
-            elif item_name in GEAR_DATA:
-                emoji = GEAR_DATA[item_name]['emoji']
-            else:
-                emoji = "📦"
-            message += f"{emoji} {item_name}\n"
-        message += "\n"
-    else:
-        message += "_Пусто - используйте команды ниже_\n\n"
+    # Добавляем переключатель на гиры
+    keyboard.append([InlineKeyboardButton("⚔️ ГИРЫ →", callback_data="autostock_show_gear")])
     
-    message += (
-        "📝 *Команды:*\n"
-        "/add\\_autostock название - Добавить\n"
-        "/remove\\_autostock название - Удалить\n"
-        "/list\\_autostock - Мой список\n\n"
-        "⏰ Проверка: каждые 5 минут\n"
-        "📢 Редкие предметы: уведомления в канал\n\n"
-        f"🕒 {current_time} МСК"
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    message = (
+        "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
+        "🌱 *СЕМЕНА*\n"
+        "Выберите предметы для отслеживания:\n"
+        "➕ - добавить\n"
+        "✅ - уже отслеживается"
     )
     
-    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
-async def add_autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Добавить предмет в автосток"""
-    user_id = update.effective_user.id
-    current_time = format_moscow_time()
+async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка нажатий на кнопки автостоков"""
+    query = update.callback_query
+    await query.answer()
     
-    if not context.args:
-        await update.message.reply_text(
-            "❌ Укажите название предмета\n"
-            f"Пример: /add\\_autostock Crimson Thorn\n\n"
-            f"🕒 {current_time} МСК",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
+    user_id = query.from_user.id
+    data = query.data
     
-    item_name = ' '.join(context.args)
-    
-    if item_name not in SEEDS_DATA and item_name not in GEAR_DATA:
-        await update.message.reply_text(
-            f"❌ Предмет '{item_name}' не найден\n\n"
-            f"🕒 {current_time} МСК",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
-    
-    success = await db.save_user_autostock(user_id, item_name)
-    
-    if success:
-        if item_name in SEEDS_DATA:
-            info = SEEDS_DATA[item_name]
-        else:
-            info = GEAR_DATA[item_name]
+    if data == "autostock_show_gear":
+        # Показать гиры
+        user_items = await db.load_user_autostocks(user_id, use_cache=False)
+        keyboard = []
+        for name, gear_data in sorted(GEAR_DATA.items()):
+            is_selected = name in user_items
+            symbol = "✅" if is_selected else "➕"
+            keyboard.append([InlineKeyboardButton(
+                f"{symbol} {gear_data['emoji']} {name}",
+                callback_data=f"autostock_gear_{name}"
+            )])
         
+        keyboard.append([InlineKeyboardButton("🥚 ЯЙЦА →", callback_data="autostock_show_eggs")])
+        keyboard.append([InlineKeyboardButton("← 🌱 СЕМЕНА", callback_data="autostock_show_seeds")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
         message = (
-            f"✅ *ДОБАВЛЕНО В АВТОСТОК*\n\n"
-            f"{info['emoji']} *{item_name}*\n"
-            f"Цена: {info['price']} ¢\n\n"
-            f"🕒 {current_time} МСК"
+            "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
+            "⚔️ *ГИРЫ*\n"
+            "Выберите предметы для отслеживания:\n"
+            "➕ - добавить\n"
+            "✅ - уже отслеживается"
         )
-        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    
+    elif data == "autostock_show_eggs":
+        # Показать яйца
+        user_items = await db.load_user_autostocks(user_id, use_cache=False)
+        keyboard = []
+        for name, egg_data in sorted(EGGS_DATA.items()):
+            is_selected = name in user_items
+            symbol = "✅" if is_selected else "➕"
+            keyboard.append([InlineKeyboardButton(
+                f"{symbol} {egg_data['emoji']} {name}",
+                callback_data=f"autostock_egg_{name}"
+            )])
+        
+        keyboard.append([InlineKeyboardButton("← ⚔️ ГИРЫ", callback_data="autostock_show_gear")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        message = (
+            "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
+            "🥚 *ЯЙЦА*\n"
+            "Выберите предметы для отслеживания:\n"
+            "➕ - добавить\n"
+            "✅ - уже отслеживается"
+        )
+        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    
+    elif data == "autostock_show_seeds":
+        # Показать семена
+        user_items = await db.load_user_autostocks(user_id, use_cache=False)
+        keyboard = []
+        for name, seed_data in sorted(SEEDS_DATA.items()):
+            is_selected = name in user_items
+            symbol = "✅" if is_selected else "➕"
+            keyboard.append([InlineKeyboardButton(
+                f"{symbol} {seed_data['emoji']} {name}",
+                callback_data=f"autostock_seed_{name}"
+            )])
+        
+        keyboard.append([InlineKeyboardButton("⚔️ ГИРЫ →", callback_data="autostock_show_gear")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        message = (
+            "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
+            "🌱 *СЕМЕНА*\n"
+            "Выберите предметы для отслеживания:\n"
+            "➕ - добавить\n"
+            "✅ - уже отслеживается"
+        )
+        await query.edit_message_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    
+    elif data.startswith("autostock_seed_"):
+        item_name = data.replace("autostock_seed_", "")
+        await toggle_autostock(query, user_id, item_name, "seed")
+    
+    elif data.startswith("autostock_gear_"):
+        item_name = data.replace("autostock_gear_", "")
+        await toggle_autostock(query, user_id, item_name, "gear")
+    
+    elif data.startswith("autostock_egg_"):
+        item_name = data.replace("autostock_egg_", "")
+        await toggle_autostock(query, user_id, item_name, "egg")
+
+async def toggle_autostock(query, user_id: int, item_name: str, item_type: str):
+    """Переключение автостока (добавить/удалить)"""
+    user_items = await db.load_user_autostocks(user_id, use_cache=False)
+    
+    if item_name in user_items:
+        # Удалить
+        await db.remove_user_autostock(user_id, item_name)
     else:
-        await update.message.reply_text(
-            f"❌ Ошибка при добавлении\n\n🕒 {current_time} МСК",
-            parse_mode=ParseMode.MARKDOWN
+        # Добавить
+        await db.save_user_autostock(user_id, item_name)
+    
+    # Обновляем кнопки
+    user_items = await db.load_user_autostocks(user_id, use_cache=False)
+    
+    if item_type == "seed":
+        keyboard = []
+        for name, data in sorted(SEEDS_DATA.items()):
+            is_selected = name in user_items
+            symbol = "✅" if is_selected else "➕"
+            keyboard.append([InlineKeyboardButton(
+                f"{symbol} {data['emoji']} {name}",
+                callback_data=f"autostock_seed_{name}"
+            )])
+        keyboard.append([InlineKeyboardButton("⚔️ ГИРЫ →", callback_data="autostock_show_gear")])
+        message = (
+            "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
+            "🌱 *СЕМЕНА*\n"
+            "Выберите предметы для отслеживания:\n"
+            "➕ - добавить\n"
+            "✅ - уже отслеживается"
         )
-
-async def remove_autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Удалить предмет из автостока"""
-    user_id = update.effective_user.id
-    current_time = format_moscow_time()
-    
-    if not context.args:
-        await update.message.reply_text(
-            "❌ Укажите название предмета\n"
-            f"Пример: /remove\\_autostock Crimson Thorn\n\n"
-            f"🕒 {current_time} МСК",
-            parse_mode=ParseMode.MARKDOWN
+    elif item_type == "gear":
+        keyboard = []
+        for name, data in sorted(GEAR_DATA.items()):
+            is_selected = name in user_items
+            symbol = "✅" if is_selected else "➕"
+            keyboard.append([InlineKeyboardButton(
+                f"{symbol} {data['emoji']} {name}",
+                callback_data=f"autostock_gear_{name}"
+            )])
+        keyboard.append([InlineKeyboardButton("🥚 ЯЙЦА →", callback_data="autostock_show_eggs")])
+        keyboard.append([InlineKeyboardButton("← 🌱 СЕМЕНА", callback_data="autostock_show_seeds")])
+        message = (
+            "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
+            "⚔️ *ГИРЫ*\n"
+            "Выберите предметы для отслеживания:\n"
+            "➕ - добавить\n"
+            "✅ - уже отслеживается"
         )
-        return
-    
-    item_name = ' '.join(context.args)
-    success = await db.remove_user_autostock(user_id, item_name)
-    
-    if success:
-        await update.message.reply_text(
-            f"🗑️ *УДАЛЕНО ИЗ АВТОСТОКА*\n\n"
-            f"*{item_name}* больше не отслеживается\n\n"
-            f"🕒 {current_time} МСК",
-            parse_mode=ParseMode.MARKDOWN
+    else:  # egg
+        keyboard = []
+        for name, data in sorted(EGGS_DATA.items()):
+            is_selected = name in user_items
+            symbol = "✅" if is_selected else "➕"
+            keyboard.append([InlineKeyboardButton(
+                f"{symbol} {data['emoji']} {name}",
+                callback_data=f"autostock_egg_{name}"
+            )])
+        keyboard.append([InlineKeyboardButton("← ⚔️ ГИРЫ", callback_data="autostock_show_gear")])
+        message = (
+            "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
+            "🥚 *ЯЙЦА*\n"
+            "Выберите предметы для отслеживания:\n"
+            "➕ - добавить\n"
+            "✅ - уже отслеживается"
         )
-    else:
-        await update.message.reply_text(
-            f"❌ Ошибка при удалении\n\n🕒 {current_time} МСК",
-            parse_mode=ParseMode.MARKDOWN
-        )
-
-async def list_autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Список автостоков пользователя"""
-    user_id = update.effective_user.id
-    user_items = await db.load_user_autostocks(user_id, use_cache=True)
-    current_time = format_moscow_time()
-    
-    message = "📋 *МОИ АВТОСТОКИ*\n\n"
-    
-    if not user_items:
-        message += "_Нет отслеживаемых предметов_"
-    else:
-        for item_name in sorted(user_items):
-            if item_name in SEEDS_DATA:
-                info = SEEDS_DATA[item_name]
-            elif item_name in GEAR_DATA:
-                info = GEAR_DATA[item_name]
-            else:
-                info = {"emoji": "📦", "price": "Unknown"}
-            message += f"{info['emoji']} *{item_name}* ({info['price']} ¢)\n"
-        message += f"\n_Всего: {len(user_items)} предметов_"
-    
-    message += f"\n\n🕒 {current_time} МСК"
-    
-    await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Справка"""
-    current_time = format_moscow_time()
-    help_text = (
-        "❓ *СПРАВКА*\n\n"
-        "📊 *Просмотр стока:*\n"
-        "/stock - Текущий сток\n"
-        "/cosmetic - Косметика\n"
-        "/weather - Погода\n\n"
-        "🔔 *Автостоки:*\n"
-        "/autostock - Информация\n"
-        "/add\\_autostock название - Добавить\n"
-        "/remove\\_autostock название - Удалить\n"
-        "/list\\_autostock - Мой список\n\n"
-        "⏰ Проверка каждые 5 минут\n"
-        "📢 Уведомления в канал: @GroowAGarden\n"
-        f"📢 Личные уведомления: в личке бота\n\n"
-        f"🕒 {current_time} МСК"
-    )
-    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
-
-# ========== ПЕРИОДИЧЕСКАЯ ПРОВЕРКА СТОКА ==========
-
-async def stock_check(context: ContextTypes.DEFAULT_TYPE):
-    """Периодическая проверка стока и отправка уведомлений"""
-    global last_stock_state
-    
-    try:
-        now = get_moscow_time()
-        current_time = format_moscow_time()
-        logger.info(f"🔍 Проверка стока - {current_time}")
-        
-        seeds = await tracker.fetch_seeds()
-        
-        if not seeds:
-            return
-        
-        current_stock = {item['name']: item['quantity'] for item in seeds}
-        
-        # ===== УВЕДОМЛЕНИЯ В КАНАЛ (только 2 редких семена) =====
-        for item_name in RAREST_SEEDS:
-            current_count = current_stock.get(item_name, 0)
-            previous_count = last_stock_state.get(item_name, 0)
-            
-            # Если предмет появился или количество увеличилось
-            if current_count > 0 and previous_count == 0:
-                if item_name in SEEDS_DATA:
-                    info = SEEDS_DATA[item_name]
-                    message = (
-                        f"🚨 *РЕДКИЙ ПРЕДМЕТ В СТОКЕ\\!* 🚨\n\n"
-                        f"{info['emoji']} *{item_name}*\n"
-                        f"📦 Количество: *x{current_count}*\n"
-                        f"💰 Цена: {info['price']} ¢\n"
-                        f"⚡ Редкость: {info['rarity']}\n\n"
-                        f"🕒 {current_time} МСК"
-                    )
-                    try:
-                        await context.bot.send_message(
-                            chat_id=CHANNEL_ID,
-                            text=message,
-                            parse_mode=ParseMode.MARKDOWN
-                        )
-                        logger.info(f"✅ Уведомление в канал: {item_name} x{current_count}")
-                    except Exception as e:
-                        logger.error(f"❌ Ошибка отправки в канал: {e}")
-        
-        # ===== ЛИЧНЫЕ УВЕДОМЛЕНИЯ (автостоки пользователей) =====
-        for item_name, count in current_stock.items():
-            previous_count = last_stock_state.get(item_name, 0)
-            
-            # Отправляем уведомление только если предмет появился
-            if count > 0 and previous_count == 0:
-                users = await db.get_users_tracking_item(item_name)
-                for user_id in users:
-                    try:
-                        if item_name in SEEDS_DATA:
-                            info = SEEDS_DATA[item_name]
-                        elif item_name in GEAR_DATA:
-                            info = GEAR_DATA[item_name]
-                        else:
-                            info = {"emoji": "📦", "price": "Unknown"}
-                        
-                        message = (
-                            f"🔔 *АВТОСТОК - ПРЕДМЕТ ПОЯВИЛСЯ\\!*\n\n"
-                            f"{info['emoji']} *{item_name}*\n"
-                            f"📦 Количество: *x{count}*\n"
-                            f"💰 Цена: {info['price']} ¢\n\n"
-                            f"🕒 {current_time} МСК"
-                        )
-                        
-                        await context.bot.send_message(
-                            chat_id=user_id,
-                            text=message,
-                            parse_mode=ParseMode.MARKDOWN
-                        )
-                    except Exception as e:
-                        logger.error(f"❌ Ошибка отправки пользователю {user_id}: {e}")
-        
-        # Обновляем состояние стока
-        last_stock_state = current_stock.copy()
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка stock_check: {e}")
-
-# ========== ЗАПУСК БОТА ==========
-
-def main():
-    logger.info("="*60)
-    logger.info("🌱 GAG Stock Tracker Bot (Telegram)")
-    logger.info("="*60)
-    
-    if not BOT_TOKEN:
-        raise ValueError("BOT_TOKEN не установлен!")
-    
-    logger.info(f"📢 Канал уведомлений: {CHANNEL_ID}")
-    logger.info(f"🔔 Редкие семена для канала: {', '.join(RAREST_SEEDS)}")
-    
-    # Создаем приложение
-    application = Application.builder().token(BOT_TOKEN).build()
-    
-    # Команды
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("stock", stock_command))
-    application.add_handler(CommandHandler("cosmetic", cosmetic_command))
-    application.add_handler(CommandHandler("weather", weather_command))
-    application.add_handler(CommandHandler("autostock", autostock_command))
-    application.add_handler(CommandHandler("add_autostock", add_autostock_command))
-    application.add_handler(CommandHandler("remove_autostock", remove_autostock_command))
-    application.add_handler(CommandHandler("list_autostock", list_autostock_command))
-    application.add_handler(CommandHandler("help", help_command))
-    
-    # Добавляем периодическую задачу проверки стока (каждые 5 минут)
-    job_queue = application.job_queue
-    job_queue.run_repeating(
-        stock_check, 
-        interval=CHECK_INTERVAL_MINUTES * 60,  # 5 минут в секундах
-        first=5  # Первая проверка через 5 секунд после запуска
-    )
-    
-    # Запускаем бота (run_polling сам управляет event loop)
-    logger.info("🚀 Запускаем бота...")
-    application.run_polling(allowed_updates=None, drop_pending_updates=True)
-
-if __name__ == "__main__":
-    main()
