@@ -13,13 +13,14 @@ from dotenv import load_dotenv
 from flask import Flask
 import pytz
 
+# Загружаем переменные окружения
 load_dotenv()
 
 # ========== КОНФИГУРАЦИЯ ==========
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@GroowAGarden")
-SUPABASE_URL = "https://tcsmfiixhflzrxkrbslk.supabase.co"
-SUPABASE_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjc21maWl4aGZsenJ4a3Jic2xrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MDUzOTYsImV4cCI6MjA3NjA4MTM5Nn0.VcAK7QYvUFuKd96OgOdadS2s_9N08pYt9mMIu73Jeiw"
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://tcsmfiixhflzrxkrbslk.supabase.co")
+SUPABASE_API_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjc21maWl4aGZsenJ4a3Jic2xrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MDUzOTYsImV4cCI6MjA3NjA4MTM5Nn0.VcAK7QYvUFuKd96OgOdadS2s_9N08pYt9mMIu73Jeiw")
 
 AUTOSTOCKS_URL = f"{SUPABASE_URL}/rest/v1/user_autostocks"
 
