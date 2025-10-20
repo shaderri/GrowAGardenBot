@@ -862,11 +862,17 @@ async def periodic_stock_check(application: Application):
                 if int(now.timestamp()) % 100 == 0:
                     _cleanup_cache()
                 
-                seeds = await tracker.fetch_seeds()
+                seeds, gear, eggs = await asyncio.gather(
+                    tracker.fetch_seeds(),
+                    tracker.fetch_gear(),
+                    tracker.fetch_eggs()
+                )
                 
                 if seeds and CHANNEL_ID:
                     await tracker.check_for_notifications(seeds, application.bot, CHANNEL_ID)
-                    await tracker.check_user_autostocks(seeds, application.bot)
+                
+                # Проверяем автостоки для всех типов предметов
+                await tracker.check_user_autostocks(seeds, gear, eggs, application.bot)
                 
                 sleep_time = calculate_sleep_time()
                 await asyncio.sleep(sleep_time)
@@ -898,7 +904,7 @@ def ping():
     
     return jsonify({
         "status": "ok",
-        "time": datetime.utcnow().isoformat() + "Z",
+        "time": datetime.now(pytz.UTC).isoformat(),
         "moscow_time": now.strftime("%H:%M:%S"),
         "next_check": next_check.strftime("%H:%M:%S"),
         "bot": "GAG Stock Tracker",
