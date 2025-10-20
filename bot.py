@@ -1,16 +1,4 @@
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_message:
-        return
-    
-    help_message = (
-        "📚 *КОМАНДЫ:*\n\n"
-        "/start - Информация\n"
-        "/stock - Текущий сток\n"
-        "/cosmetic - Косметика\n"
-        "/autostock - Настроить автостоки\n"
-        "/help - Справка\n\n"
-        "⏰ Проверка каждые 5 минут\n"
-        f"📢 Канал: {CHANNEL_import asyncio
+import asyncio
 import aiohttp
 import logging
 import os
