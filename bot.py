@@ -1,4 +1,16 @@
-import asyncio
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message:
+        return
+    
+    help_message = (
+        "📚 *КОМАНДЫ:*\n\n"
+        "/start - Информация\n"
+        "/stock - Текущий сток\n"
+        "/cosmetic - Косметика\n"
+        "/autostock - Настроить автостоки\n"
+        "/help - Справка\n\n"
+        "⏰ Проверка каждые 5 минут\n"
+        f"📢 Канал: {CHANNEL_import asyncio
 import aiohttp
 import logging
 import os
@@ -27,13 +39,9 @@ SUPABASE_API_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVC
 
 AUTOSTOCKS_URL = f"{SUPABASE_URL}/rest/v1/user_autostocks"
 
-# API игры
-GAG_API_BASE = "https://gagapi.onrender.com"
-SEEDS_API = f"{GAG_API_BASE}/seeds"
-GEAR_API = f"{GAG_API_BASE}/gear"
-COSMETICS_API = f"{GAG_API_BASE}/cosmetics"
-EGGS_API = f"{GAG_API_BASE}/eggs"
-WEATHER_API = f"{GAG_API_BASE}/weather"
+# API игры - новое стабильное API
+STOCK_API_URL = "https://api.joshlei.com/v2/growagarden/stock"
+JSTUDIO_API_KEY = "js_57957a83efa789cee2333abdfbea362ab33ac2f83fa8a8bc7f7d791b19266397"
 
 CHECK_INTERVAL_MINUTES = 5
 CHECK_DELAY_SECONDS = 10
@@ -52,7 +60,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 logger.info(f"🔗 Supabase: {SUPABASE_URL}")
-logger.info(f"🔗 API: {GAG_API_BASE}")
+logger.info(f"🔗 API: {STOCK_API_URL}")
 
 # ========== ДАННЫЕ ПРЕДМЕТОВ ==========
 SEEDS_DATA = {
@@ -363,8 +371,9 @@ class StockTracker:
             is_active = weather.get('active', False)
             
             if is_active and weather_type != 'normal':
-                # Активная специальная погода
+                # Показываем название погоды
                 weather_names = {
+                    'snow': '❄️ Снежная',
                     'gold': '🌟 Золотая',
                     'diamond': '💎 Алмазная',
                     'frozen': '❄️ Ледяная',
@@ -439,12 +448,13 @@ class StockTracker:
         message += f"\n\n🕒 {current_time} МСК"
         return message
 
-    async def check_for_notifications(self, seeds, bot: Bot, channel_id: str):
+    async def check_for_notifications(self, stock_data: Dict, bot: Bot, channel_id: str):
         global last_stock_state
-        if not seeds or not channel_id:
+        if not stock_data or not channel_id:
             return
 
-        current_stock = {item.get('name', ''): item.get('quantity', 0) for item in seeds if item.get('name')}
+        seeds = stock_data.get('seed_stock', [])
+        current_stock = {item.get('display_name', ''): item.get('quantity', 0) for item in seeds if item.get('display_name')}
 
         for item_name in RAREST_SEEDS:
             current_count = current_stock.get(item_name, 0)
@@ -480,7 +490,7 @@ class StockTracker:
             current_time = get_moscow_time().strftime("%H:%M:%S")
 
             message = (
-                f"🔔 *АВТОСТОК - {item_name}\\!*\n\n"
+                f"🔔 *АВТОСТОК - {item_name}*\n\n"
                 f"{item_info['emoji']} *{item_name}*\n"
                 f"📦 Количество: *x{count}*\n"
                 f"💰 Цена: {item_info['price']} ¢\n\n"
@@ -502,36 +512,39 @@ class StockTracker:
         last_time = last_autostock_notification[item_name]
         return (now - last_time).total_seconds() >= AUTOSTOCK_NOTIFICATION_COOLDOWN
     
-    async def check_user_autostocks(self, seeds, gear, eggs, bot: Bot):
+    async def check_user_autostocks(self, stock_data: Dict, bot: Bot):
         """ОПТИМИЗАЦИЯ: Массовая отправка уведомлений с батчами"""
         global last_autostock_notification
         
-        if not seeds and not gear and not eggs:
+        if not stock_data:
             return
 
         # Объединяем все предметы в один словарь
         current_stock = {}
         
-        if seeds:
-            for item in seeds:
-                name = item.get('name', '')
-                quantity = item.get('quantity', 0)
-                if name and quantity > 0:
-                    current_stock[name] = quantity
+        # Семена
+        seeds = stock_data.get('seed_stock', [])
+        for item in seeds:
+            name = item.get('display_name', '')
+            quantity = item.get('quantity', 0)
+            if name and quantity > 0:
+                current_stock[name] = quantity
         
-        if gear:
-            for item in gear:
-                name = item.get('name', '')
-                quantity = item.get('quantity', 0)
-                if name and quantity > 0:
-                    current_stock[name] = quantity
+        # Гиры
+        gear = stock_data.get('gear_stock', [])
+        for item in gear:
+            name = item.get('display_name', '')
+            quantity = item.get('quantity', 0)
+            if name and quantity > 0:
+                current_stock[name] = quantity
         
-        if eggs:
-            for item in eggs:
-                name = item.get('name', '')
-                quantity = item.get('quantity', 0)
-                if name and quantity > 0:
-                    current_stock[name] = quantity
+        # Яйца
+        eggs = stock_data.get('egg_stock', [])
+        for item in eggs:
+            name = item.get('display_name', '')
+            quantity = item.get('quantity', 0)
+            if name and quantity > 0:
+                current_stock[name] = quantity
 
         # Батчинг: группируем запросы к БД
         items_to_check = [item_name for item_name, count in current_stock.items() 
@@ -627,7 +640,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_message = (
         "👋 *GAG Stock Tracker!*\n\n"
         "📊 /stock - Текущий сток\n"
-        "🌤️ /weather - Погода\n"
+        "✨ /cosmetic - Косметика\n"
         "🔔 /autostock - Автостоки\n"
         "❓ /help - Справка\n\n"
         f"📢 Канал: {CHANNEL_ID}"
@@ -648,31 +661,27 @@ async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    seeds, gear, eggs = await asyncio.gather(
-        tracker.fetch_seeds(),
-        tracker.fetch_gear(),
-        tracker.fetch_eggs()
-    )
-    
-    message = tracker.format_stock_message(seeds, gear, eggs)
+    stock_data = await tracker.fetch_stock()
+    message = tracker.format_stock_message(stock_data)
     await update.effective_message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
-async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cosmetic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message:
         return
     
     user_id = update.effective_user.id
     
     # Проверка кулдауна
-    can_execute, seconds_left = check_command_cooldown(user_id, 'weather')
+    can_execute, seconds_left = check_command_cooldown(user_id, 'cosmetic')
     if not can_execute:
         await update.effective_message.reply_text(
             f"⏳ Подождите {seconds_left} сек. перед следующим запросом"
         )
         return
     
-    weather = await tracker.fetch_weather()
-    message = tracker.format_weather_message(weather)
+    stock_data = await tracker.fetch_stock()
+    cosmetics = await tracker.fetch_cosmetics_list(stock_data)
+    message = tracker.format_cosmetics_message(cosmetics or [])
     await update.effective_message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
 async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
