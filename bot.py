@@ -123,12 +123,14 @@ ITEMS_DATA.update({k: {**v, "category": "egg"} for k, v in EGGS_DATA.items()})
 
 # ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
 last_stock_state: Dict[str, int] = {}
+last_autostock_notification: Dict[str, datetime] = {}  # Кэш последних уведомлений
 user_autostocks_cache: Dict[int, Set[str]] = {}
 user_autostocks_time: Dict[int, datetime] = {}
 user_cooldowns: Dict[int, Dict[str, datetime]] = {}
 AUTOSTOCK_CACHE_TTL = 120
 MAX_CACHE_SIZE = 10000
 COMMAND_COOLDOWN = 15  # Кулдаун 15 секунд
+AUTOSTOCK_NOTIFICATION_COOLDOWN = 600  # 10 минут между уведомлениями об одном предмете
 
 NAME_TO_ID: Dict[str, str] = {}
 ID_TO_NAME: Dict[str, str] = {}
@@ -489,25 +491,131 @@ class StockTracker:
         except:
             pass
     
-    async def check_user_autostocks(self, seeds, bot: Bot):
-        """Проверка автостоков пользователей"""
-        if not seeds:
+    def can_send_autostock_notification(self, item_name: str) -> bool:
+        """Проверка, можно ли отправить уведомление (кулдаун 10 минут)"""
+        global last_autostock_notification
+        
+        if item_name not in last_autostock_notification:
+            return True
+        
+        now = get_moscow_time()
+        last_time = last_autostock_notification[item_name]
+        return (now - last_time).total_seconds() >= AUTOSTOCK_NOTIFICATION_COOLDOWN
+    
+    async def check_user_autostocks(self, seeds, gear, eggs, bot: Bot):
+        """ОПТИМИЗАЦИЯ: Массовая отправка уведомлений с батчами"""
+        global last_autostock_notification
+        
+        if not seeds and not gear and not eggs:
             return
 
-        current_stock = {item.get('name', ''): item.get('quantity', 0) for item in seeds if item.get('name')}
+        # Объединяем все предметы в один словарь
+        current_stock = {}
+        
+        if seeds:
+            for item in seeds:
+                name = item.get('name', '')
+                quantity = item.get('quantity', 0)
+                if name and quantity > 0:
+                    current_stock[name] = quantity
+        
+        if gear:
+            for item in gear:
+                name = item.get('name', '')
+                quantity = item.get('quantity', 0)
+                if name and quantity > 0:
+                    current_stock[name] = quantity
+        
+        if eggs:
+            for item in eggs:
+                name = item.get('name', '')
+                quantity = item.get('quantity', 0)
+                if name and quantity > 0:
+                    current_stock[name] = quantity
 
-        for item_name, count in current_stock.items():
-            if count > 0:
-                try:
-                    users = await self.db.get_users_tracking_item(item_name)
-                    for user_id in users:
-                        try:
-                            await self.send_autostock_notification(bot, user_id, item_name, count)
-                            await asyncio.sleep(0.05)  # 50ms задержка
-                        except:
-                            pass
-                except:
-                    pass
+        # Батчинг: группируем запросы к БД
+        items_to_check = [item_name for item_name, count in current_stock.items() 
+                         if count > 0 and self.can_send_autostock_notification(item_name)]
+        
+        if not items_to_check:
+            return
+        
+        # ОПТИМИЗАЦИЯ: Используем конкурентные запросы к БД
+        tasks = [self.db.get_users_tracking_item(item_name) for item_name in items_to_check]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Создаем очередь уведомлений
+        notifications_queue = []
+        for item_name, users_result in zip(items_to_check, results):
+            if isinstance(users_result, list):
+                count = current_stock[item_name]
+                for user_id in users_result:
+                    notifications_queue.append((user_id, item_name, count))
+        
+        # ОПТИМИЗАЦИЯ: Отправляем батчами по 10 сообщений
+        batch_size = 10
+        for i in range(0, len(notifications_queue), batch_size):
+            batch = notifications_queue[i:i + batch_size]
+            
+            # Отправляем батч параллельно
+            send_tasks = [
+                self.send_autostock_notification(bot, user_id, item_name, count)
+                for user_id, item_name, count in batch
+            ]
+            await asyncio.gather(*send_tasks, return_exceptions=True)
+            
+            # Небольшая задержка между батчами
+            if i + batch_size < len(notifications_queue):
+                await asyncio.sleep(0.1)  # 100ms между батчами
+        
+        # Обновляем время последних уведомлений
+        for item_name in items_to_check:
+            last_autostock_notification[item_name] = get_moscow_time()
+        
+        if len(notifications_queue) > 0:
+            logger.info(f"📤 Отправлено {len(notifications_queue)} автосток уведомлений")
+
+    def format_stock_message(self, seeds, gear, eggs) -> str:
+        current_time = get_moscow_time().strftime("%H:%M:%S")
+        message = "📊 *ТЕКУЩИЙ СТОК*\n\n"
+        
+        if seeds:
+            message += "🌱 *СЕМЕНА:*\n"
+            for item in seeds:
+                name = item.get('name', '')
+                quantity = item.get('quantity', 0)
+                if name in SEEDS_DATA:
+                    data = SEEDS_DATA[name]
+                    message += f"{data['emoji']} {name} x{quantity}\n"
+            message += "\n"
+        else:
+            message += "🌱 *СЕМЕНА:* _Пусто_\n\n"
+        
+        if gear:
+            message += "⚔️ *ГИРЫ:*\n"
+            for item in gear:
+                name = item.get('name', '')
+                quantity = item.get('quantity', 0)
+                if name in GEAR_DATA:
+                    data = GEAR_DATA[name]
+                    message += f"{data['emoji']} {name} x{quantity}\n"
+            message += "\n"
+        else:
+            message += "⚔️ *ГИРЫ:* _Пусто_\n\n"
+        
+        if eggs:
+            message += "🥚 *ЯЙЦА:*\n"
+            for item in eggs:
+                name = item.get('name', '')
+                quantity = item.get('quantity', 0)
+                if name in EGGS_DATA:
+                    data = EGGS_DATA[name]
+                    message += f"{data['emoji']} {name} x{quantity}\n"
+        else:
+            message += "🥚 *ЯЙЦА:* _Пусто_"
+        
+        message += f"\n\n🕒 {current_time} МСК"
+        return message
 
 tracker = StockTracker()
 
