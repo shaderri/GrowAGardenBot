@@ -32,7 +32,7 @@ STOCK_API_URL = "https://api.joshlei.com/v2/growagarden/stock"
 JSTUDIO_API_KEY = "js_57957a83efa789cee2333abdfbea362ab33ac2f83fa8a8bc7f7d791b19266397"
 
 CHECK_INTERVAL_MINUTES = 5
-CHECK_DELAY_SECONDS = 10
+CHECK_DELAY_SECONDS = 15
 
 # Редкие предметы для канала
 RAREST_SEEDS = ["Crimson Thorn", "Great Pumpkin"]
