@@ -831,7 +831,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📚 *КОМАНДЫ:*\n\n"
         "/start - Информация\n"
         "/stock - Текущий сток\n"
-        "/weather - Погода в игре\n"
+        "/cosmetic - Косметика\n"
         "/autostock - Настроить автостоки\n"
         "/help - Справка\n\n"
         "⏰ Проверка каждые 5 минут\n"
@@ -859,17 +859,14 @@ async def periodic_stock_check(application: Application):
                 if int(now.timestamp()) % 100 == 0:
                     _cleanup_cache()
                 
-                seeds, gear, eggs = await asyncio.gather(
-                    tracker.fetch_seeds(),
-                    tracker.fetch_gear(),
-                    tracker.fetch_eggs()
-                )
+                stock_data = await tracker.fetch_stock()
                 
-                if seeds and CHANNEL_ID:
-                    await tracker.check_for_notifications(seeds, application.bot, CHANNEL_ID)
+                if stock_data and CHANNEL_ID:
+                    await tracker.check_for_notifications(stock_data, application.bot, CHANNEL_ID)
                 
-                # Проверяем автостоки для всех типов предметов
-                await tracker.check_user_autostocks(seeds, gear, eggs, application.bot)
+                # Проверяем автостоки
+                if stock_data:
+                    await tracker.check_user_autostocks(stock_data, application.bot)
                 
                 sleep_time = calculate_sleep_time()
                 await asyncio.sleep(sleep_time)
@@ -927,7 +924,7 @@ def main():
 
     telegram_app.add_handler(CommandHandler("start", start_command))
     telegram_app.add_handler(CommandHandler("stock", stock_command))
-    telegram_app.add_handler(CommandHandler("weather", weather_command))
+    telegram_app.add_handler(CommandHandler("cosmetic", cosmetic_command))
     telegram_app.add_handler(CommandHandler("autostock", autostock_command))
     telegram_app.add_handler(CommandHandler("help", help_command))
     
