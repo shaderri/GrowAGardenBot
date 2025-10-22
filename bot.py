@@ -29,7 +29,7 @@ AUTOSTOCKS_URL = f"{SUPABASE_URL}/rest/v1/user_autostocks"
 
 # API игры - новое стабильное API
 STOCK_API_URL = "https://api.joshlei.com/v2/growagarden/stock"
-JSTUDIO_API_KEY = "js_57957a83efa789cee2333abdfbea362ab33ac2f83fa8a8bc7f7d791b19266397"
+JSTUDIO_API_KEY = "js_d13b70f7f36009fa6214398eee56ed9da474f22411fcc509e971a118fb333037"
 
 CHECK_INTERVAL_MINUTES = 5
 CHECK_DELAY_SECONDS = 10
