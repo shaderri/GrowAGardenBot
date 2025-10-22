@@ -32,7 +32,7 @@ STOCK_API_URL = "https://api.joshlei.com/v2/growagarden/stock"
 JSTUDIO_API_KEY = "js_57957a83efa789cee2333abdfbea362ab33ac2f83fa8a8bc7f7d791b19266397"
 
 CHECK_INTERVAL_MINUTES = 5
-CHECK_DELAY_SECONDS = 15
+CHECK_DELAY_SECONDS = 10
 
 # Редкие предметы для канала
 RAREST_SEEDS = ["Crimson Thorn", "Great Pumpkin"]
@@ -119,14 +119,14 @@ ITEMS_DATA.update({k: {**v, "category": "egg"} for k, v in EGGS_DATA.items()})
 
 # ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
 last_stock_state: Dict[str, int] = {}
-last_autostock_notification: Dict[str, datetime] = {}  # Кэш последних уведомлений
+last_autostock_notification: Dict[str, datetime] = {}
 user_autostocks_cache: Dict[int, Set[str]] = {}
 user_autostocks_time: Dict[int, datetime] = {}
 user_cooldowns: Dict[int, Dict[str, datetime]] = {}
 AUTOSTOCK_CACHE_TTL = 120
 MAX_CACHE_SIZE = 10000
-COMMAND_COOLDOWN = 15  # Кулдаун 15 секунд
-AUTOSTOCK_NOTIFICATION_COOLDOWN = 600  # 10 минут между уведомлениями об одном предмете
+COMMAND_COOLDOWN = 15
+AUTOSTOCK_NOTIFICATION_COOLDOWN = 600
 
 NAME_TO_ID: Dict[str, str] = {}
 ID_TO_NAME: Dict[str, str] = {}
@@ -140,6 +140,9 @@ telegram_app: Optional[Application] = None
 # ========== УТИЛИТЫ ==========
 def get_moscow_time() -> datetime:
     return datetime.now(pytz.timezone('Europe/Moscow'))
+
+def format_moscow_time() -> str:
+    return get_moscow_time().strftime('%H:%M:%S')
 
 def get_next_check_time() -> datetime:
     now = get_moscow_time()
@@ -196,7 +199,6 @@ def _cleanup_cache():
         logger.info(f"♻️ Очищено {len(to_delete)} записей из кэша")
 
 def check_command_cooldown(user_id: int, command: str) -> tuple[bool, Optional[int]]:
-    """Проверка кулдауна команды"""
     if user_id not in user_cooldowns:
         user_cooldowns[user_id] = {}
     
@@ -318,75 +320,36 @@ class StockTracker:
             await self.session.close()
         await self.db.close_session()
 
-    async def fetch_api(self, url: str) -> Optional[List[Dict]]:
+    async def fetch_stock(self) -> Optional[Dict]:
+        """Получение всего стока из нового API"""
         try:
             await self.init_session()
-            async with self.session.get(url, timeout=10) as response:
+            headers = {"X-API-KEY": JSTUDIO_API_KEY}
+            
+            async with self.session.get(STOCK_API_URL, headers=headers, timeout=10) as response:
                 if response.status == 200:
                     return await response.json()
                 return None
         except Exception as e:
-            logger.error(f"❌ Ошибка API: {e}")
+            logger.error(f"❌ Ошибка API стока: {e}")
             return None
+    
+    async def fetch_cosmetics_list(self, stock_data: Dict) -> Optional[List[Dict]]:
+        """Извлечение косметики из стока"""
+        if stock_data and 'cosmetic_stock' in stock_data:
+            return stock_data['cosmetic_stock']
+        return None
 
-    async def fetch_seeds(self) -> Optional[List[Dict]]:
-        return await self.fetch_api(SEEDS_API)
-
-    async def fetch_gear(self) -> Optional[List[Dict]]:
-        return await self.fetch_api(GEAR_API)
-
-    async def fetch_eggs(self) -> Optional[List[Dict]]:
-        return await self.fetch_api(EGGS_API)
-
-    async def fetch_weather(self) -> Optional[Dict]:
-        try:
-            await self.init_session()
-            async with self.session.get(WEATHER_API, timeout=10) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data if isinstance(data, dict) else None
-                return None
-        except Exception as e:
-            logger.error(f"❌ Ошибка погоды: {e}")
-            return None
-
-    def format_weather_message(self, weather) -> str:
-        current_time = get_moscow_time().strftime("%H:%M:%S")
-        message = "🌤️ *ПОГОДА В ИГРЕ*\n\n"
-        
-        if weather and isinstance(weather, dict):
-            weather_type = weather.get('type', 'normal')
-            is_active = weather.get('active', False)
-            
-            if is_active and weather_type != 'normal':
-                # Показываем название погоды
-                weather_names = {
-                    'snow': '❄️ Снежная',
-                    'gold': '🌟 Золотая',
-                    'diamond': '💎 Алмазная',
-                    'frozen': '❄️ Ледяная',
-                    'neon': '🌈 Неоновая',
-                    'rainbow': '🌈 Радужная',
-                    'magma': '🌋 Магма',
-                    'galaxy': '🌌 Галактика'
-                }
-                weather_name = weather_names.get(weather_type, f'🌤️ {weather_type.capitalize()}')
-                message += f"{weather_name} погода"
-            else:
-                # Погоды нет
-                message += "_Сейчас погоды нет_"
-        else:
-            message += "_Сейчас погоды нет_"
-        
-        message += f"\n\n🕒 {current_time} МСК"
-        return message
-        current_time = get_moscow_time().strftime("%H:%M:%S")
+    def format_stock_message(self, stock_data: Dict) -> str:
+        current_time = format_moscow_time()
         message = "📊 *ТЕКУЩИЙ СТОК*\n\n"
         
+        # Семена
+        seeds = stock_data.get('seed_stock', []) if stock_data else []
         if seeds:
             message += "🌱 *СЕМЕНА:*\n"
             for item in seeds:
-                name = item.get('name', '')
+                name = item.get('display_name', '')
                 quantity = item.get('quantity', 0)
                 if name in SEEDS_DATA:
                     data = SEEDS_DATA[name]
@@ -395,10 +358,12 @@ class StockTracker:
         else:
             message += "🌱 *СЕМЕНА:* _Пусто_\n\n"
         
+        # Гиры
+        gear = stock_data.get('gear_stock', []) if stock_data else []
         if gear:
             message += "⚔️ *ГИРЫ:*\n"
             for item in gear:
-                name = item.get('name', '')
+                name = item.get('display_name', '')
                 quantity = item.get('quantity', 0)
                 if name in GEAR_DATA:
                     data = GEAR_DATA[name]
@@ -407,10 +372,12 @@ class StockTracker:
         else:
             message += "⚔️ *ГИРЫ:* _Пусто_\n\n"
         
+        # Яйца
+        eggs = stock_data.get('egg_stock', []) if stock_data else []
         if eggs:
             message += "🥚 *ЯЙЦА:*\n"
             for item in eggs:
-                name = item.get('name', '')
+                name = item.get('display_name', '')
                 quantity = item.get('quantity', 0)
                 if name in EGGS_DATA:
                     data = EGGS_DATA[name]
@@ -418,45 +385,28 @@ class StockTracker:
         else:
             message += "🥚 *ЯЙЦА:* _Пусто_"
         
-        message += f"\n\n🕒 {current_time} МСК"
+        message += f"\n🕒 {current_time} МСК"
         return message
-
-    def format_weather_message(self, weather) -> str:
-        current_time = get_moscow_time().strftime("%H:%M:%S")
-        message = "🌤️ *ПОГОДА В ИГРЕ*\n\n"
+    
+    def format_cosmetics_message(self, cosmetics: List[Dict]) -> str:
+        current_time = format_moscow_time()
+        message = "✨ *СТОК КОСМЕТИКИ*\n\n"
         
-        if weather and isinstance(weather, dict):
-            current = weather.get('current', 'Неизвестно')
-            upcoming = weather.get('upcoming', 'Неизвестно')
-            message += f"Текущая: {current}\n"
-            message += f"Следующая: {upcoming}"
+        if cosmetics:
+            for item in cosmetics:
+                name = item.get('display_name', '')
+                quantity = item.get('quantity', 0)
+                message += f"🎨 {name} x{quantity}\n"
         else:
-            message += "_Данные недоступны_"
+            message += "_Пусто_"
         
-        message += f"\n\n🕒 {current_time} МСК"
+        message += f"\n🕒 {current_time} МСК"
         return message
-
-    async def check_for_notifications(self, stock_data: Dict, bot: Bot, channel_id: str):
-        global last_stock_state
-        if not stock_data or not channel_id:
-            return
-
-        seeds = stock_data.get('seed_stock', [])
-        current_stock = {item.get('display_name', ''): item.get('quantity', 0) for item in seeds if item.get('display_name')}
-
-        for item_name in RAREST_SEEDS:
-            current_count = current_stock.get(item_name, 0)
-            previous_count = last_stock_state.get(item_name, 0)
-            
-            if current_count > 0 and previous_count == 0:
-                await self.send_notification(bot, channel_id, item_name, current_count)
-
-        last_stock_state = current_stock.copy()
 
     async def send_notification(self, bot: Bot, channel_id: str, item_name: str, count: int):
         try:
             item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "Unknown"})
-            current_time = get_moscow_time().strftime("%H:%M:%S")
+            current_time = format_moscow_time()
 
             message = (
                 f"🚨 *РЕДКИЙ ПРЕДМЕТ В СТОКЕ\\!* 🚨\n\n"
@@ -472,10 +422,9 @@ class StockTracker:
             logger.error(f"❌ Ошибка отправки: {e}")
     
     async def send_autostock_notification(self, bot: Bot, user_id: int, item_name: str, count: int):
-        """Отправка уведомления об автостоке"""
         try:
             item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "Unknown"})
-            current_time = get_moscow_time().strftime("%H:%M:%S")
+            current_time = format_moscow_time()
 
             message = (
                 f"🔔 *АВТОСТОК - {item_name}*\n\n"
@@ -490,7 +439,6 @@ class StockTracker:
             pass
     
     def can_send_autostock_notification(self, item_name: str) -> bool:
-        """Проверка, можно ли отправить уведомление (кулдаун 10 минут)"""
         global last_autostock_notification
         
         if item_name not in last_autostock_notification:
@@ -501,13 +449,11 @@ class StockTracker:
         return (now - last_time).total_seconds() >= AUTOSTOCK_NOTIFICATION_COOLDOWN
     
     async def check_user_autostocks(self, stock_data: Dict, bot: Bot):
-        """ОПТИМИЗАЦИЯ: Массовая отправка уведомлений с батчами"""
         global last_autostock_notification
         
         if not stock_data:
             return
 
-        # Объединяем все предметы в один словарь
         current_stock = {}
         
         # Семена
@@ -534,18 +480,15 @@ class StockTracker:
             if name and quantity > 0:
                 current_stock[name] = quantity
 
-        # Батчинг: группируем запросы к БД
         items_to_check = [item_name for item_name, count in current_stock.items() 
                          if count > 0 and self.can_send_autostock_notification(item_name)]
         
         if not items_to_check:
             return
         
-        # ОПТИМИЗАЦИЯ: Используем конкурентные запросы к БД
         tasks = [self.db.get_users_tracking_item(item_name) for item_name in items_to_check]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Создаем очередь уведомлений
         notifications_queue = []
         for item_name, users_result in zip(items_to_check, results):
             if isinstance(users_result, list):
@@ -553,70 +496,41 @@ class StockTracker:
                 for user_id in users_result:
                     notifications_queue.append((user_id, item_name, count))
         
-        # ОПТИМИЗАЦИЯ: Отправляем батчами по 10 сообщений
         batch_size = 10
         for i in range(0, len(notifications_queue), batch_size):
             batch = notifications_queue[i:i + batch_size]
             
-            # Отправляем батч параллельно
             send_tasks = [
                 self.send_autostock_notification(bot, user_id, item_name, count)
                 for user_id, item_name, count in batch
             ]
             await asyncio.gather(*send_tasks, return_exceptions=True)
             
-            # Небольшая задержка между батчами
             if i + batch_size < len(notifications_queue):
-                await asyncio.sleep(0.1)  # 100ms между батчами
+                await asyncio.sleep(0.1)
         
-        # Обновляем время последних уведомлений
         for item_name in items_to_check:
             last_autostock_notification[item_name] = get_moscow_time()
         
         if len(notifications_queue) > 0:
             logger.info(f"📤 Отправлено {len(notifications_queue)} автосток уведомлений")
 
-    def format_stock_message(self, seeds, gear, eggs) -> str:
-        current_time = get_moscow_time().strftime("%H:%M:%S")
-        message = "📊 *ТЕКУЩИЙ СТОК*\n\n"
-        
-        if seeds:
-            message += "🌱 *СЕМЕНА:*\n"
-            for item in seeds:
-                name = item.get('name', '')
-                quantity = item.get('quantity', 0)
-                if name in SEEDS_DATA:
-                    data = SEEDS_DATA[name]
-                    message += f"{data['emoji']} {name} x{quantity}\n"
-            message += "\n"
-        else:
-            message += "🌱 *СЕМЕНА:* _Пусто_\n\n"
-        
-        if gear:
-            message += "⚔️ *ГИРЫ:*\n"
-            for item in gear:
-                name = item.get('name', '')
-                quantity = item.get('quantity', 0)
-                if name in GEAR_DATA:
-                    data = GEAR_DATA[name]
-                    message += f"{data['emoji']} {name} x{quantity}\n"
-            message += "\n"
-        else:
-            message += "⚔️ *ГИРЫ:* _Пусто_\n\n"
-        
-        if eggs:
-            message += "🥚 *ЯЙЦА:*\n"
-            for item in eggs:
-                name = item.get('name', '')
-                quantity = item.get('quantity', 0)
-                if name in EGGS_DATA:
-                    data = EGGS_DATA[name]
-                    message += f"{data['emoji']} {name} x{quantity}\n"
-        else:
-            message += "🥚 *ЯЙЦА:* _Пусто_"
-        
-        message += f"\n\n🕒 {current_time} МСК"
-        return message
+    async def check_for_notifications(self, stock_data: Dict, bot: Bot, channel_id: str):
+        global last_stock_state
+        if not stock_data or not channel_id:
+            return
+
+        seeds = stock_data.get('seed_stock', [])
+        current_stock = {item.get('display_name', ''): item.get('quantity', 0) for item in seeds if item.get('display_name')}
+
+        for item_name in RAREST_SEEDS:
+            current_count = current_stock.get(item_name, 0)
+            previous_count = last_stock_state.get(item_name, 0)
+            
+            if current_count > 0 and previous_count == 0:
+                await self.send_notification(bot, channel_id, item_name, current_count)
+
+        last_stock_state = current_stock.copy()
 
 tracker = StockTracker()
 
@@ -641,7 +555,6 @@ async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = update.effective_user.id
     
-    # Проверка кулдауна
     can_execute, seconds_left = check_command_cooldown(user_id, 'stock')
     if not can_execute:
         await update.effective_message.reply_text(
@@ -659,7 +572,6 @@ async def cosmetic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = update.effective_user.id
     
-    # Проверка кулдауна
     can_execute, seconds_left = check_command_cooldown(user_id, 'cosmetic')
     if not can_execute:
         await update.effective_message.reply_text(
@@ -678,7 +590,6 @@ async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = update.effective_user.id
     
-    # Проверка кулдауна
     can_execute, seconds_left = check_command_cooldown(user_id, 'autostock')
     if not can_execute:
         await update.effective_message.reply_text(
@@ -864,7 +775,6 @@ async def periodic_stock_check(application: Application):
                 if stock_data and CHANNEL_ID:
                     await tracker.check_for_notifications(stock_data, application.bot, CHANNEL_ID)
                 
-                # Проверяем автостоки
                 if stock_data:
                     await tracker.check_user_autostocks(stock_data, application.bot)
                 
