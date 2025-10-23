@@ -324,11 +324,15 @@ class StockTracker:
         """Получение всего стока из нового API"""
         try:
             await self.init_session()
-            headers = {"X-API-KEY": JSTUDIO_API_KEY}
+            # ИСПРАВЛЕНО: используем правильный заголовок jstudio-key
+            headers = {"jstudio-key": JSTUDIO_API_KEY}
             
             async with self.session.get(STOCK_API_URL, headers=headers, timeout=10) as response:
                 if response.status == 200:
                     return await response.json()
+                else:
+                    error_text = await response.text()
+                    logger.error(f"❌ API вернуло {response.status}: {error_text}")
                 return None
         except Exception as e:
             logger.error(f"❌ Ошибка API стока: {e}")
