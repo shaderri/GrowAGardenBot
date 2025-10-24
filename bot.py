@@ -240,7 +240,7 @@ async def check_subscription(bot: Bot, user_id: int) -> bool:
     try:
         # Пробуем получить информацию о пользователе в канале
         member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        is_subscribed = member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER, ChatMember.CREATOR]
+        is_subscribed = member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]
         
         # Сохраняем в кэш
         subscription_cache[user_id] = (is_subscribed, get_moscow_time())
@@ -733,6 +733,9 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     # Обработка проверки подписки
     if data == "check_sub":
+        # Сбрасываем кэш для этого пользователя
+        subscription_cache.pop(user_id, None)
+        
         is_subscribed = await check_subscription(context.bot, user_id)
         if is_subscribed:
             welcome_message = (
