@@ -238,15 +238,19 @@ async def check_subscription(bot: Bot, user_id: int) -> bool:
             return is_subscribed
     
     try:
-        member = await bot.get_chat_member(chat_id=f"@{CHANNEL_USERNAME}", user_id=user_id)
-        is_subscribed = member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]
+        # Пробуем получить информацию о пользователе в канале
+        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+        is_subscribed = member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER, ChatMember.CREATOR]
         
         # Сохраняем в кэш
         subscription_cache[user_id] = (is_subscribed, get_moscow_time())
+        logger.info(f"✅ Проверка подписки user_id={user_id}: {member.status}")
         return is_subscribed
     except Exception as e:
-        logger.error(f"❌ Ошибка проверки подписки: {e}")
-        return True  # В случае ошибки разрешаем доступ
+        logger.error(f"❌ Ошибка проверки подписки для {user_id}: {e}")
+        # В случае ошибки считаем подписанным (чтобы не блокировать при сбое API)
+        subscription_cache[user_id] = (True, get_moscow_time())
+        return True
 
 def get_subscription_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для подписки на канал"""
