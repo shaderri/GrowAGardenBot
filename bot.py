@@ -13,11 +13,6 @@ from telegram.error import TelegramError
 from flask import Flask, jsonify, request as flask_request
 import pytz
 from dotenv import load_dotenv
-import sys, os
-print(">>> discord module file:", getattr(__import__("discord"), "__file__", None))
-print(">>> discord version:", getattr(__import__("discord"), "__version__", "unknown"))
-print(">>> cwd:", os.getcwd())
-sys.stdout.flush()
 import discord
 
 load_dotenv()
