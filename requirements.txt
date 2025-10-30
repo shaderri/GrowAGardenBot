@@ -1,6 +1,6 @@
 python-telegram-bot[job-queue]>=21.0
+discord.py-self
 aiohttp>=3.9.0
 python-dotenv==1.0.1
 pytz==2024.2
-requests==2.32.3
 Flask==3.1.0
