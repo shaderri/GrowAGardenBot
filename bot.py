@@ -14,6 +14,8 @@ from flask import Flask, jsonify, request as flask_request
 import pytz
 from dotenv import load_dotenv
 import discord
+print("Discord path:", discord.__file__)
+print("Discord version:", getattr(discord, '__version__', 'unknown'))
 
 load_dotenv()
 
