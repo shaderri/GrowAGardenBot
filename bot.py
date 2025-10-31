@@ -83,7 +83,7 @@ SEEDS_DATA = {
     "Grape": {"emoji": "🍇", "price": "850,000"},
     "Mushroom": {"emoji": "🍄", "price": "150,000"},
     "Pepper": {"emoji": "🌶️", "price": "1,000,000"},
-    "Cacao": {"emoji": "🫘", "price": "2,500,000"},
+    "Cacao": {"emoji": "🍫", "price": "2,500,000"},
     "Beanstalk": {"emoji": "🪜", "price": "10,000,000"},
     "Ember Lily": {"emoji": "🔥", "price": "15,000,000"},
     "Sugar Apple": {"emoji": "🍎", "price": "25,000,000"},
@@ -453,7 +453,7 @@ class DiscordStockParser:
             
             # Парсим предметы
             if current_section and 'x' in line:
-                # Убираем смодзи и лишние символы
+                # Убираем эмодзи и лишние символы
                 clean_line = re.sub(r'[^\w\s\-]', '', line)
                 match = re.search(r'([A-Za-z\s\-]+)\s*x(\d+)', clean_line)
                 
@@ -530,6 +530,9 @@ class DiscordStockParser:
             return None
     
     def format_stock_message(self, stock_data: Dict) -> str:
+        if not stock_data:
+            return "❌ *Не удалось получить данные о стоке*\n\n_Discord клиент не готов или нет данных_"
+        
         current_time = format_moscow_time()
         message = "📊 *ТЕКУЩИЙ СТОК*\n\n"
         
@@ -703,11 +706,7 @@ parser = DiscordStockParser()
 # ========== DISCORD CLIENT ==========
 class StockDiscordClient(discord.Client):
     def __init__(self):
-        intents = discord.Intents.default()
-        intents.messages = True
-        intents.message_content = True
-        intents.guilds = True
-        super().__init__(intents=intents)
+        super().__init__()
     
     async def on_ready(self):
         logger.info(f'✅ Discord: Залогинен как {self.user}')
@@ -771,6 +770,14 @@ async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not can_execute:
         await update.effective_message.reply_text(
             f"⏳ Подождите {seconds_left} сек. перед следующим запросом"
+        )
+        return
+    
+    # Проверяем готовность Discord
+    if not discord_client or not discord_client.is_ready():
+        await update.effective_message.reply_text(
+            "⚠️ *Discord клиент загружается*\n\nПожалуйста, подождите немного и попробуйте снова.",
+            parse_mode=ParseMode.MARKDOWN
         )
         return
     
