@@ -3,8 +3,6 @@
 .env.local
 .env.*.local
 
-runtime.txt
-
 # Python
 __pycache__/
 *.py[cod]
