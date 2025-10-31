@@ -180,7 +180,7 @@ last_autostock_notification: Dict[str, datetime] = {}
 user_autostocks_cache: Dict[int, Set[str]] = {}
 user_autostocks_time: Dict[int, datetime] = {}
 user_cooldowns: Dict[int, Dict[str, datetime]] = {}
-subscription_cache: Dict[int, tuple[bool, datetime]] = {}
+subscription_cache: Dict[int, tuple] = {}
 
 AUTOSTOCK_CACHE_TTL = 180
 MAX_CACHE_SIZE = 15000
@@ -266,7 +266,7 @@ def _cleanup_cache():
         for user_id in to_delete:
             subscription_cache.pop(user_id, None)
 
-def check_command_cooldown(user_id: int, command: str) -> tuple[bool, Optional[int]]:
+def check_command_cooldown(user_id: int, command: str) -> tuple:
     if user_id not in user_cooldowns:
         user_cooldowns[user_id] = {}
     
@@ -277,10 +277,10 @@ def check_command_cooldown(user_id: int, command: str) -> tuple[bool, Optional[i
         
         if elapsed < COMMAND_COOLDOWN:
             seconds_left = int(COMMAND_COOLDOWN - elapsed)
-            return False, seconds_left
+            return (False, seconds_left)
     
     user_cooldowns[user_id][command] = get_moscow_time()
-    return True, None
+    return (True, None)
 
 async def check_subscription(bot: Bot, user_id: int) -> bool:
     global subscription_cache
@@ -421,7 +421,7 @@ class DiscordStockParser:
         self.db = SupabaseDB()
         self.telegram_bot: Optional[Bot] = None
     
-    def parse_stock_message(self, content: str) -> Dict[str, List[tuple[str, int]]]:
+    def parse_stock_message(self, content: str) -> Dict:
         """Парсинг сообщения со стоком"""
         result = {
             "seeds": [],
