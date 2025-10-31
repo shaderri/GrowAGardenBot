@@ -83,7 +83,7 @@ SEEDS_DATA = {
     "Grape": {"emoji": "🍇", "price": "850,000"},
     "Mushroom": {"emoji": "🍄", "price": "150,000"},
     "Pepper": {"emoji": "🌶️", "price": "1,000,000"},
-    "Cacao": {"emoji": "🍫", "price": "2,500,000"},
+    "Cacao": {"emoji": "🫘", "price": "2,500,000"},
     "Beanstalk": {"emoji": "🪜", "price": "10,000,000"},
     "Ember Lily": {"emoji": "🔥", "price": "15,000,000"},
     "Sugar Apple": {"emoji": "🍎", "price": "25,000,000"},
@@ -453,7 +453,7 @@ class DiscordStockParser:
             
             # Парсим предметы
             if current_section and 'x' in line:
-                # Убираем эмодзи и лишние символы
+                # Убираем смодзи и лишние символы
                 clean_line = re.sub(r'[^\w\s\-]', '', line)
                 match = re.search(r'([A-Za-z\s\-]+)\s*x(\d+)', clean_line)
                 
@@ -703,7 +703,11 @@ parser = DiscordStockParser()
 # ========== DISCORD CLIENT ==========
 class StockDiscordClient(discord.Client):
     def __init__(self):
-        super().__init__()
+        intents = discord.Intents.default()
+        intents.messages = True
+        intents.message_content = True
+        intents.guilds = True
+        super().__init__(intents=intents)
     
     async def on_ready(self):
         logger.info(f'✅ Discord: Залогинен как {self.user}')
