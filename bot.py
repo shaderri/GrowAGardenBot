@@ -13,9 +13,6 @@ from telegram.error import TelegramError
 from flask import Flask, jsonify, request as flask_request
 import pytz
 from dotenv import load_dotenv
-import sys
-import types
-sys.modules['audioop'] = types.ModuleType('audioop')
 import discord
 
 load_dotenv()
