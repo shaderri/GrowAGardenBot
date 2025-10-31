@@ -13,9 +13,16 @@ from telegram.error import TelegramError
 from flask import Flask, jsonify, request as flask_request
 import pytz
 from dotenv import load_dotenv
+import sys
+import subprocess
+
+# Проверяем, есть ли discord, и удаляем
+subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "discord"], check=False)
+subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "discord.py"], check=False)
+
+# Переустанавливаем discord.py-self
+subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall", "discord.py-self==2.0.1"], check=True)
 import discord
-print("Discord path:", discord.__file__)
-print("Discord version:", getattr(discord, '__version__', 'unknown'))
 
 load_dotenv()
 
