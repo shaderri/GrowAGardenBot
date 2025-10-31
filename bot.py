@@ -13,15 +13,6 @@ from telegram.error import TelegramError
 from flask import Flask, jsonify, request as flask_request
 import pytz
 from dotenv import load_dotenv
-import sys
-import subprocess
-
-# Проверяем, есть ли discord, и удаляем
-subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "discord"], check=False)
-subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "discord.py"], check=False)
-
-# Переустанавливаем discord.py-self
-subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall", "discord.py-self==2.0.1"], check=True)
 import discord
 
 load_dotenv()
@@ -712,10 +703,7 @@ parser = DiscordStockParser()
 # ========== DISCORD CLIENT ==========
 class StockDiscordClient(discord.Client):
     def __init__(self):
-        intents = discord.Intents.default()
-        intents.message_content = True
-        intents.guilds = True
-        super().__init__(intents=intents)
+        super().__init__()
     
     async def on_ready(self):
         logger.info(f'✅ Discord: Залогинен как {self.user}')
