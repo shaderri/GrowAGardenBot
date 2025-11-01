@@ -488,10 +488,16 @@ class DiscordStockParser:
                         logger.warning(f"⚠️ Канал {channel_name} не найден")
                         continue
                     
-                    # Получаем последние 2 сообщения
+                    # Получаем последние 2 сообщения БЕЗ limit в history
                     messages = []
-                    async for msg in channel.history(limit=2):
-                        messages.append(msg)
+                    try:
+                        async for msg in channel.history(limit=2):
+                            messages.append(msg)
+                            if len(messages) >= 2:
+                                break
+                    except Exception as hist_error:
+                        logger.error(f"❌ Ошибка history канала {channel_name}: {hist_error}")
+                        continue
                     
                     # Ищем сообщение от бота (не реклама)
                     for msg in messages:
@@ -1081,18 +1087,23 @@ def main():
 
     build_item_id_mappings()
 
-    # Запуск Discord клиента в отдельном потоке
+    # Запуск Discord клиента в отдельном потоке с собственным loop
     global discord_client
     discord_client = StockDiscordClient()
     
     def run_discord():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(discord_client.start(DISCORD_TOKEN))
+        try:
+            discord_client.run(DISCORD_TOKEN)
+        except Exception as e:
+            logger.error(f"❌ Discord ошибка: {e}")
     
     discord_thread = threading.Thread(target=run_discord, daemon=True)
     discord_thread.start()
     logger.info("🔄 Discord клиент запущен в фоне")
+    
+    # Ждём 5 секунд чтобы Discord подключился
+    import time
+    time.sleep(5)
 
     # Telegram бот
     global telegram_app
