@@ -125,17 +125,16 @@ EGGS_DATA = {
 }
 
 EVENT_DATA = {
-    "Bloodred Mushroom": {"emoji": "🍄", "price": "15", "category": "event"},
-    "Candy Cornflower": {"emoji": "🌽", "price": "30", "category": "event"},
-    "Ghost Bear": {"emoji": "👻", "price": "70", "category": "event"},
-    "Ghost Lantern": {"emoji": "🏮", "price": "11", "category": "event"},
-    "Halloween Gear Box": {"emoji": "📦", "price": "30", "category": "event"},
-    "Pumpkin Crate": {"emoji": "📦", "price": "20", "category": "event"},
-    "Pumpkin Set": {"emoji": "🎃", "price": "5", "category": "event"},
-    "Sarcophagus": {"emoji": "🏺", "price": "60", "category": "event"},
-    "Spider Prop": {"emoji": "🕷️", "price": "6", "category": "event"},
-    "Spooky Crate": {"emoji": "👻", "price": "20", "category": "event"},
-    "Spooky Egg": {"emoji": "🥚", "price": "30", "category": "event"},
+    "Orange Delight": {"emoji": "🍊", "price": "149", "category": "event"},
+    "Explorer's Compass": {"emoji": "🧭", "price": "179", "category": "event"},
+    "Safari Crate": {"emoji": "📦", "price": "179", "category": "event"},
+    "Zebra Whistle": {"emoji": "🦓", "price": "179", "category": "event"},
+    "Safari Egg": {"emoji": "🥚", "price": "149", "category": "event"},
+    "Protea": {"emoji": "🌺", "price": "479", "category": "event"},
+    "Lush Sprinkler": {"emoji": "💦", "price": "299", "category": "event"},
+    "Mini Shipping Container": {"emoji": "🚢", "price": "179", "category": "event"},
+    "Safari Totem Charm": {"emoji": "🗿", "price": "339", "category": "event"},
+    "Baobab": {"emoji": "🌳", "price": "799", "category": "event"},
 }
 
 ITEMS_DATA = {}
@@ -488,12 +487,12 @@ class DiscordStockParser:
         # Ивенты
         events = stock_data.get('events', [])
         if events:
-            message += "🎃 *ИВЕНТ:*\n"
+            message += "🌴 *ИВЕНТ:*\n"
             for item_name, quantity in events:
-                item_info = EVENT_DATA.get(item_name, {"emoji": "🎃", "price": "?"})
+                item_info = EVENT_DATA.get(item_name, {"emoji": "📦", "price": "?"})
                 message += f"{item_info['emoji']} {item_name} x{quantity}\n"
         else:
-            message += "🎃 *ИВЕНТ:* _Пусто_"
+            message += "📦 *ИВЕНТ:* _Пусто_"
         
         message += f"\n🕒 {current_time} МСК"
         return message
