@@ -416,6 +416,8 @@ class SupabaseDB:
             return []
 
 # ========== DISCORD ПАРСЕР ==========
+discord_loop: Optional[asyncio.AbstractEventLoop] = None
+
 class DiscordStockParser:
     def __init__(self):
         self.db = SupabaseDB()
@@ -466,10 +468,44 @@ class DiscordStockParser:
         
         return result
     
+    async def _fetch_channel_messages(self, channel_id: int):
+        """Получение сообщений канала в Discord loop"""
+        try:
+            channel = discord_client.get_channel(channel_id)
+            if not channel:
+                return []
+            
+            messages = []
+            async for msg in channel.history(limit=2):
+                messages.append({
+                    'author_name': msg.author.name if msg.author else '',
+                    'author_bot': msg.author.bot if msg.author else False,
+                    'content': msg.content,
+                    'embeds': [
+                        {
+                            'description': embed.description,
+                            'fields': [{'name': f.name, 'value': f.value} for f in embed.fields]
+                        } for embed in msg.embeds
+                    ]
+                })
+                if len(messages) >= 2:
+                    break
+            
+            return messages
+        except Exception as e:
+            logger.error(f"❌ Ошибка _fetch_channel_messages: {e}")
+            return []
+    
     async def fetch_discord_stock(self) -> Optional[Dict]:
         """Получение стока из Discord каналов"""
+        global discord_loop
+        
         if not discord_client or not discord_client.is_ready():
             logger.error("❌ Discord клиент не готов")
+            return None
+        
+        if not discord_loop:
+            logger.error("❌ Discord loop не установлен")
             return None
         
         try:
@@ -483,47 +519,39 @@ class DiscordStockParser:
             # Парсим каждый канал
             for channel_name, channel_id in DISCORD_CHANNELS.items():
                 try:
-                    channel = discord_client.get_channel(channel_id)
-                    if not channel:
-                        logger.warning(f"⚠️ Канал {channel_name} не найден")
+                    # Вызываем метод в Discord loop
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._fetch_channel_messages(channel_id),
+                        discord_loop
+                    )
+                    messages = future.result(timeout=10)
+                    
+                    if not messages:
+                        logger.warning(f"⚠️ Канал {channel_name}: нет сообщений")
                         continue
                     
-                    # Получаем последние 2 сообщения БЕЗ limit в history
-                    messages = []
-                    try:
-                        async for msg in channel.history(limit=2):
-                            messages.append(msg)
-                            if len(messages) >= 2:
-                                break
-                    except Exception as hist_error:
-                        logger.error(f"❌ Ошибка history канала {channel_name}: {hist_error}")
-                        continue
-                    
-                    # Ищем сообщение от бота (не реклама)
-                    for msg in messages:
-                        # Проверяем, что это бот Vulcan или Dawn
-                        if msg.author.bot and ('Vulcan' in msg.author.name or 'Dawn' in msg.author.name):
-                            # Парсим embed если есть
+                    # Обрабатываем сообщения
+                    for msg_data in messages:
+                        if msg_data['author_bot'] and ('Vulcan' in msg_data['author_name'] or 'Dawn' in msg_data['author_name']):
                             content_to_parse = ""
                             
-                            if msg.embeds:
-                                for embed in msg.embeds:
-                                    if embed.description:
-                                        content_to_parse += embed.description + "\n"
-                                    for field in embed.fields:
-                                        content_to_parse += f"{field.name}\n{field.value}\n"
+                            # Парсим embeds
+                            for embed in msg_data['embeds']:
+                                if embed['description']:
+                                    content_to_parse += embed['description'] + "\n"
+                                for field in embed['fields']:
+                                    content_to_parse += f"{field['name']}\n{field['value']}\n"
                             
-                            if msg.content:
-                                content_to_parse += msg.content
+                            if msg_data['content']:
+                                content_to_parse += msg_data['content']
                             
                             if content_to_parse:
                                 parsed = self.parse_stock_message(content_to_parse)
                                 
-                                # Объединяем результаты
                                 for category in parsed:
                                     stock_data[category].extend(parsed[category])
                                 
-                                break  # Нашли нужное сообщение, выходим
+                                break
                 
                 except Exception as e:
                     logger.error(f"❌ Ошибка парсинга канала {channel_name}: {e}")
