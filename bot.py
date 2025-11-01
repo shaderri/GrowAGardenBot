@@ -4,6 +4,7 @@ import os
 import re
 import hashlib
 import threading
+import queue
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List, Set
 from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
@@ -23,7 +24,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@GroowAGarden")
 CHANNEL_USERNAME = "GroowAGarden"
 
-# Supabase для автостоков и пользователей
+# Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://tcsmfiixhflzrxkrbslk.supabase.co")
 SUPABASE_API_KEY = os.getenv("SUPABASE_KEY", "")
 
@@ -32,22 +33,19 @@ USERS_URL = f"{SUPABASE_URL}/rest/v1/users"
 
 # Discord каналы
 DISCORD_CHANNELS = {
-    "stock": 1373218015042207804,  # Семена + Гиры
-    "egg_stock": 1373218102313091072,  # Яйца
-    "cosmetics_stock": 1376539587949887499,  # Косметика
-    "event_content": 1396257564311949503,  # Ивент (Dawn server)
+    "stock": 1373218015042207804,
+    "egg_stock": 1373218102313091072,
+    "cosmetics_stock": 1376539587949887499,
+    "event_content": 1396257564311949503,
 }
 
 CHECK_INTERVAL_MINUTES = 5
 CHECK_DELAY_SECONDS = 10
 
-# Редкие предметы для канала
 RAREST_SEEDS = ["Crimson Thorn", "Great Pumpkin"]
 
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN не установлен!")
-if not DISCORD_TOKEN:
-    raise ValueError("DISCORD_TOKEN не установлен!")
+if not BOT_TOKEN or not DISCORD_TOKEN:
+    raise ValueError("BOT_TOKEN и DISCORD_TOKEN должны быть установлены!")
 
 # ========== ЛОГИРОВАНИЕ ==========
 logging.basicConfig(
@@ -56,12 +54,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Отключаем логи discord.py
 discord_logger = logging.getLogger('discord')
 discord_logger.setLevel(logging.WARNING)
-
-logger.info(f"🔗 Supabase: {SUPABASE_URL}")
-logger.info(f"🔗 Discord Parser Mode")
 
 # ========== ДАННЫЕ ПРЕДМЕТОВ ==========
 SEEDS_DATA = {
@@ -91,81 +85,57 @@ SEEDS_DATA = {
     "Giant Pinecone": {"emoji": "🌲", "price": "55,000,000"},
     "Elder Strawberry": {"emoji": "🍓", "price": "70,000,000"},
     "Romanesco": {"emoji": "🥦", "price": "88,000,000"},
-    "Crimson Thorn": {"emoji": "🌹", "price": "10,000,000,000"},
-    "Great Pumpkin": {"emoji": "🎃", "price": "1,000,000,000,000"},
+    "Crimson Thorn": {"emoji": "🌹", "price": "10B"},
+    "Great Pumpkin": {"emoji": "🎃", "price": "1T"},
     "Broccoli": {"emoji": "🥦", "price": "600"},
     "Potato": {"emoji": "🥔", "price": "500"},
     "Cocomango": {"emoji": "🥥", "price": "5,000"},
 }
 
 GEAR_DATA = {
-    "Watering Can": {"emoji": "💧", "price": "50,000"},
-    "Trowel": {"emoji": "🔨", "price": "100,000"},
-    "Trading Ticket": {"emoji": "🎫", "price": "100,000"},
-    "Recall Wrench": {"emoji": "🔧", "price": "150,000"},
-    "Basic Sprinkler": {"emoji": "💦", "price": "25,000"},
-    "Advanced Sprinkler": {"emoji": "💦", "price": "50,000"},
-    "Medium Treat": {"emoji": "🍖", "price": "4,000,000"},
-    "Medium Toy": {"emoji": "🎮", "price": "4,000,000"},
-    "Godly Sprinkler": {"emoji": "✨", "price": "120,000"},
-    "Magnifying Glass": {"emoji": "🔍", "price": "10,000,000"},
-    "Master Sprinkler": {"emoji": "👑", "price": "10,000,000"},
-    "Cleaning Spray": {"emoji": "🧼", "price": "15,000,000"},
-    "Favorite Tool": {"emoji": "⭐", "price": "20,000,000"},
-    "Harvest Tool": {"emoji": "✂️", "price": "30,000,000"},
-    "Friendship Pot": {"emoji": "🪴", "price": "15,000,000"},
-    "Level Up Lollipop": {"emoji": "🍭", "price": "10,000,000,000"},
-    "Grandmaster Sprinkler": {"emoji": "🏆", "price": "1,000,000,000"},
-    "Pet Name Reroller": {"emoji": "🎲", "price": "5,000,000"},
-    "Cleansing Pet Shard": {"emoji": "✨", "price": "3,000,000"},
+    "Watering Can": {"emoji": "💧", "price": "50k"},
+    "Trowel": {"emoji": "🔨", "price": "100k"},
+    "Trading Ticket": {"emoji": "🎫", "price": "100k"},
+    "Recall Wrench": {"emoji": "🔧", "price": "150k"},
+    "Basic Sprinkler": {"emoji": "💦", "price": "25k"},
+    "Advanced Sprinkler": {"emoji": "💦", "price": "50k"},
+    "Medium Treat": {"emoji": "🍖", "price": "4M"},
+    "Medium Toy": {"emoji": "🎮", "price": "4M"},
+    "Godly Sprinkler": {"emoji": "✨", "price": "120k"},
+    "Magnifying Glass": {"emoji": "🔍", "price": "10M"},
+    "Master Sprinkler": {"emoji": "👑", "price": "10M"},
+    "Cleaning Spray": {"emoji": "🧼", "price": "15M"},
+    "Favorite Tool": {"emoji": "⭐", "price": "20M"},
+    "Harvest Tool": {"emoji": "✂️", "price": "30M"},
+    "Friendship Pot": {"emoji": "🪴", "price": "15M"},
+    "Level Up Lollipop": {"emoji": "🍭", "price": "10B"},
+    "Grandmaster Sprinkler": {"emoji": "🏆", "price": "1B"},
+    "Pet Name Reroller": {"emoji": "🎲", "price": "5M"},
+    "Cleansing Pet Shard": {"emoji": "✨", "price": "3M"},
 }
 
 EGGS_DATA = {
-    "Common Egg": {"emoji": "🥚", "price": "50,000"},
-    "Uncommon Egg": {"emoji": "🟡", "price": "150,000"},
-    "Rare Egg": {"emoji": "🔵", "price": "600,000"},
-    "Legendary Egg": {"emoji": "💜", "price": "3,000,000"},
-    "Mythical Egg": {"emoji": "🌈", "price": "8,000,000"},
-    "Bug Egg": {"emoji": "🐛", "price": "50,000,000"},
-    "Jungle Egg": {"emoji": "🦜", "price": "60,000,000"},
+    "Common Egg": {"emoji": "🥚", "price": "50k"},
+    "Uncommon Egg": {"emoji": "🟡", "price": "150k"},
+    "Rare Egg": {"emoji": "🔵", "price": "600k"},
+    "Legendary Egg": {"emoji": "💜", "price": "3M"},
+    "Mythical Egg": {"emoji": "🌈", "price": "8M"},
+    "Bug Egg": {"emoji": "🐛", "price": "50M"},
+    "Jungle Egg": {"emoji": "🦜", "price": "60M"},
 }
 
 EVENT_DATA = {
-    "Spooky Chest": {"emoji": "📦", "price": "30", "category": "event"},
     "Bloodred Mushroom": {"emoji": "🍄", "price": "15", "category": "event"},
-    "Jack O Lantern": {"emoji": "🎃", "price": "24", "category": "event"},
-    "Pumpkin": {"emoji": "🎃", "price": "8", "category": "event"},
     "Candy Cornflower": {"emoji": "🌽", "price": "30", "category": "event"},
-    "Ghoul Root": {"emoji": "👻", "price": "40", "category": "event"},
-    "Chicken Feed": {"emoji": "🐔", "price": "65", "category": "event"},
-    "Seer Vine": {"emoji": "🔮", "price": "90", "category": "event"},
-    "Poison Apple": {"emoji": "🍎", "price": "140", "category": "event"},
-    "Blood Orange": {"emoji": "🍊", "price": "200", "category": "event"},
-    "Spooky Egg": {"emoji": "🥚", "price": "30", "category": "event"},
-    "Pumpkin Rat": {"emoji": "🐀", "price": "40", "category": "event"},
-    "Goat": {"emoji": "🐐", "price": "50", "category": "event"},
-    "Wolf": {"emoji": "🐺", "price": "80", "category": "event"},
     "Ghost Bear": {"emoji": "👻", "price": "70", "category": "event"},
-    "Dark Spriggan": {"emoji": "🌿", "price": "100", "category": "event"},
-    "Reaper": {"emoji": "💀", "price": "140", "category": "event"},
-    "Pumpkin Crate": {"emoji": "📦", "price": "20", "category": "event"},
-    "Spooky Crate": {"emoji": "👻", "price": "20", "category": "event"},
-    "Pumpkin Set": {"emoji": "🎃", "price": "5", "category": "event"},
-    "Spider Prop": {"emoji": "🕷️", "price": "6", "category": "event"},
     "Ghost Lantern": {"emoji": "🏮", "price": "11", "category": "event"},
-    "Halloween Lights": {"emoji": "💡", "price": "15", "category": "event"},
-    "Black String Lights": {"emoji": "💡", "price": "15", "category": "event"},
-    "Tombstones": {"emoji": "🪦", "price": "22", "category": "event"},
-    "Casket": {"emoji": "⚰️", "price": "33", "category": "event"},
-    "Skull Chain": {"emoji": "💀", "price": "44", "category": "event"},
-    "Spell Book": {"emoji": "📖", "price": "36", "category": "event"},
-    "Hex Circle": {"emoji": "🔮", "price": "55", "category": "event"},
-    "Sarcophagus": {"emoji": "🏺", "price": "60", "category": "event"},
     "Halloween Gear Box": {"emoji": "📦", "price": "30", "category": "event"},
-    "Halloween Radar": {"emoji": "📡", "price": "5", "category": "event"},
-    "Suspicious Soup": {"emoji": "🍲", "price": "8", "category": "event"},
-    "Witch's Broom": {"emoji": "🧹", "price": "8", "category": "event"},
-    "Lich Crystal": {"emoji": "💎", "price": "15", "category": "event"},
+    "Pumpkin Crate": {"emoji": "📦", "price": "20", "category": "event"},
+    "Pumpkin Set": {"emoji": "🎃", "price": "5", "category": "event"},
+    "Sarcophagus": {"emoji": "🏺", "price": "60", "category": "event"},
+    "Spider Prop": {"emoji": "🕷️", "price": "6", "category": "event"},
+    "Spooky Crate": {"emoji": "👻", "price": "20", "category": "event"},
+    "Spooky Egg": {"emoji": "🥚", "price": "30", "category": "event"},
 }
 
 ITEMS_DATA = {}
@@ -197,6 +167,10 @@ EGG_ITEMS_LIST = [(name, info) for name, info in ITEMS_DATA.items() if info['cat
 
 telegram_app: Optional[Application] = None
 discord_client: Optional[discord.Client] = None
+
+# Queue для межпоточного общения
+stock_request_queue = queue.Queue()
+stock_response_queue = queue.Queue()
 
 # ========== УТИЛИТЫ ==========
 def get_moscow_time() -> datetime:
@@ -416,15 +390,12 @@ class SupabaseDB:
             return []
 
 # ========== DISCORD ПАРСЕР ==========
-discord_loop: Optional[asyncio.AbstractEventLoop] = None
-
 class DiscordStockParser:
     def __init__(self):
         self.db = SupabaseDB()
         self.telegram_bot: Optional[Bot] = None
     
     def parse_stock_message(self, content: str) -> Dict:
-        """Парсинг сообщения со стоком"""
         result = {
             "seeds": [],
             "gear": [],
@@ -432,14 +403,12 @@ class DiscordStockParser:
             "events": []
         }
         
-        # Парсим строки типа "🥕 Carrot x9" или "Carrot x9"
         lines = content.split('\n')
         current_section = None
         
         for line in lines:
             line = line.strip()
             
-            # Определяем секцию
             if 'SEEDS STOCK' in line or 'Spooky Seeds' in line:
                 current_section = 'seeds'
                 continue
@@ -453,9 +422,7 @@ class DiscordStockParser:
                 current_section = 'events'
                 continue
             
-            # Парсим предметы
             if current_section and 'x' in line:
-                # Убираем эмодзи и лишние символы
                 clean_line = re.sub(r'[^\w\s\-]', '', line)
                 match = re.search(r'([A-Za-z\s\-]+)\s*x(\d+)', clean_line)
                 
@@ -468,99 +435,14 @@ class DiscordStockParser:
         
         return result
     
-    async def _fetch_channel_messages(self, channel_id: int):
-        """Получение сообщений канала в Discord loop"""
+    def get_stock_sync(self) -> Optional[Dict]:
+        """Синхронный запрос стока через очередь"""
         try:
-            channel = discord_client.get_channel(channel_id)
-            if not channel:
-                return []
-            
-            messages = []
-            async for msg in channel.history(limit=2):
-                messages.append({
-                    'author_name': msg.author.name if msg.author else '',
-                    'author_bot': msg.author.bot if msg.author else False,
-                    'content': msg.content,
-                    'embeds': [
-                        {
-                            'description': embed.description,
-                            'fields': [{'name': f.name, 'value': f.value} for f in embed.fields]
-                        } for embed in msg.embeds
-                    ]
-                })
-                if len(messages) >= 2:
-                    break
-            
-            return messages
+            stock_request_queue.put("fetch", timeout=1)
+            stock_data = stock_response_queue.get(timeout=15)
+            return stock_data if stock_data != "error" else None
         except Exception as e:
-            logger.error(f"❌ Ошибка _fetch_channel_messages: {e}")
-            return []
-    
-    async def fetch_discord_stock(self) -> Optional[Dict]:
-        """Получение стока из Discord каналов"""
-        global discord_loop
-        
-        if not discord_client or not discord_client.is_ready():
-            logger.error("❌ Discord клиент не готов")
-            return None
-        
-        if not discord_loop:
-            logger.error("❌ Discord loop не установлен")
-            return None
-        
-        try:
-            stock_data = {
-                "seeds": [],
-                "gear": [],
-                "eggs": [],
-                "events": []
-            }
-            
-            # Парсим каждый канал
-            for channel_name, channel_id in DISCORD_CHANNELS.items():
-                try:
-                    # Вызываем метод в Discord loop
-                    future = asyncio.run_coroutine_threadsafe(
-                        self._fetch_channel_messages(channel_id),
-                        discord_loop
-                    )
-                    messages = future.result(timeout=10)
-                    
-                    if not messages:
-                        logger.warning(f"⚠️ Канал {channel_name}: нет сообщений")
-                        continue
-                    
-                    # Обрабатываем сообщения
-                    for msg_data in messages:
-                        if msg_data['author_bot'] and ('Vulcan' in msg_data['author_name'] or 'Dawn' in msg_data['author_name']):
-                            content_to_parse = ""
-                            
-                            # Парсим embeds
-                            for embed in msg_data['embeds']:
-                                if embed['description']:
-                                    content_to_parse += embed['description'] + "\n"
-                                for field in embed['fields']:
-                                    content_to_parse += f"{field['name']}\n{field['value']}\n"
-                            
-                            if msg_data['content']:
-                                content_to_parse += msg_data['content']
-                            
-                            if content_to_parse:
-                                parsed = self.parse_stock_message(content_to_parse)
-                                
-                                for category in parsed:
-                                    stock_data[category].extend(parsed[category])
-                                
-                                break
-                
-                except Exception as e:
-                    logger.error(f"❌ Ошибка парсинга канала {channel_name}: {e}")
-                    continue
-            
-            return stock_data
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка fetch_discord_stock: {e}")
+            logger.error(f"❌ get_stock_sync error: {e}")
             return None
     
     def format_stock_message(self, stock_data: Dict) -> str:
@@ -669,7 +551,6 @@ class DiscordStockParser:
 
         current_stock = {}
         
-        # Собираем все предметы в стоке
         for stock_type in ['seeds', 'gear', 'eggs', 'events']:
             items = stock_data.get(stock_type, [])
             for item_name, quantity in items:
@@ -682,7 +563,6 @@ class DiscordStockParser:
         if not items_to_check:
             return
         
-        # Получаем пользователей для всех предметов одновременно
         item_users_map = {}
         tasks = [self.db.get_users_tracking_item(item_name) for item_name in items_to_check]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -691,7 +571,6 @@ class DiscordStockParser:
             if not isinstance(result, Exception) and result:
                 item_users_map[item_name] = result
         
-        # Формируем очередь уведомлений
         send_tasks = []
         for item_name, count in current_stock.items():
             if item_name in item_users_map:
@@ -699,17 +578,14 @@ class DiscordStockParser:
                 for user_id in users:
                     send_tasks.append(self.send_autostock_notification(bot, user_id, item_name, count))
                     
-                    # Отправляем батчами по 50
                     if len(send_tasks) >= 50:
                         await asyncio.gather(*send_tasks, return_exceptions=True)
                         send_tasks = []
                         await asyncio.sleep(0.03)
         
-        # Отправляем оставшиеся
         if send_tasks:
             await asyncio.gather(*send_tasks, return_exceptions=True)
         
-        # Обновляем время последнего уведомления
         for item_name in items_to_check:
             last_autostock_notification[item_name] = get_moscow_time()
         
@@ -740,26 +616,103 @@ parser = DiscordStockParser()
 # ========== DISCORD CLIENT ==========
 class StockDiscordClient(discord.Client):
     def __init__(self):
-        super().__init__()
+        intents = discord.Intents.default()
+        intents.messages = True
+        intents.message_content = True
+        intents.guilds = True
+        super().__init__(intents=intents)
     
     async def on_ready(self):
         logger.info(f'✅ Discord: Залогинен как {self.user}')
         
-        # Проверяем доступ к каналам
         for channel_name, channel_id in DISCORD_CHANNELS.items():
             channel = self.get_channel(channel_id)
             if channel:
                 logger.info(f"✅ Канал {channel_name}: {channel.name}")
             else:
                 logger.error(f"❌ Канал {channel_name} недоступен")
+        
+        # Запускаем обработчик запросов
+        asyncio.create_task(self.stock_request_handler())
+    
+    async def stock_request_handler(self):
+        """Обработчик запросов стока в Discord loop"""
+        while True:
+            try:
+                # Проверяем очередь без блокировки
+                try:
+                    request = stock_request_queue.get_nowait()
+                    if request == "fetch":
+                        stock_data = await self.fetch_stock_internal()
+                        stock_response_queue.put(stock_data)
+                except queue.Empty:
+                    pass
+                
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                logger.error(f"❌ Ошибка stock_request_handler: {e}")
+                await asyncio.sleep(1)
+    
+    async def fetch_stock_internal(self) -> Dict:
+        """Получение стока внутри Discord loop"""
+        try:
+            stock_data = {
+                "seeds": [],
+                "gear": [],
+                "eggs": [],
+                "events": []
+            }
+            
+            for channel_name, channel_id in DISCORD_CHANNELS.items():
+                try:
+                    channel = self.get_channel(channel_id)
+                    if not channel:
+                        continue
+                    
+                    messages = []
+                    async for msg in channel.history(limit=2):
+                        messages.append(msg)
+                        if len(messages) >= 2:
+                            break
+                    
+                    for msg in messages:
+                        if msg.author.bot and ('Vulcan' in msg.author.name or 'Dawn' in msg.author.name):
+                            content_to_parse = ""
+                            
+                            if msg.embeds:
+                                for embed in msg.embeds:
+                                    if embed.description:
+                                        content_to_parse += embed.description + "\n"
+                                    for field in embed.fields:
+                                        content_to_parse += f"{field.name}\n{field.value}\n"
+                            
+                            if msg.content:
+                                content_to_parse += msg.content
+                            
+                            if content_to_parse:
+                                parsed = parser.parse_stock_message(content_to_parse)
+                                
+                                for category in parsed:
+                                    stock_data[category].extend(parsed[category])
+                                
+                                break
+                
+                except Exception as e:
+                    logger.error(f"❌ Ошибка парсинга {channel_name}: {e}")
+                    continue
+            
+            return stock_data
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка fetch_stock_internal: {e}")
+            return {"seeds": [], "gear": [], "eggs": [], "events": []}
 
-# ========== КОМАНДЫ БОТА ==========
+# ========== КОМАНДЫ TELEGRAM БОТА ==========
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_user:
         return
     
     user = update.effective_user
-    
     asyncio.create_task(parser.db.save_user(user.id, user.username, user.first_name))
     
     is_subscribed = await check_subscription(context.bot, user.id)
@@ -807,15 +760,14 @@ async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Проверяем готовность Discord
     if not discord_client or not discord_client.is_ready():
         await update.effective_message.reply_text(
-            "⚠️ *Discord клиент загружается*\n\nПожалуйста, подождите немного и попробуйте снова.",
+            "⚠️ *Discord клиент загружается*\n\nПожалуйста, подождите и попробуйте снова.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
     
-    stock_data = await parser.fetch_discord_stock()
+    stock_data = parser.get_stock_sync()
     message = parser.format_stock_message(stock_data)
     await update.effective_message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
@@ -1031,7 +983,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def periodic_stock_check(application: Application):
     logger.info("🚀 Периодическая проверка запущена")
     
-    # Ждем пока Discord клиент будет готов
     while not discord_client or not discord_client.is_ready():
         await asyncio.sleep(1)
     
@@ -1051,7 +1002,7 @@ async def periodic_stock_check(application: Application):
                 if check_count % 12 == 0:
                     _cleanup_cache()
                 
-                stock_data = await parser.fetch_discord_stock()
+                stock_data = parser.get_stock_sync()
                 
                 if stock_data:
                     tasks = []
@@ -1095,10 +1046,9 @@ def ping():
         "time": datetime.now(pytz.UTC).isoformat(),
         "moscow_time": now.strftime("%H:%M:%S"),
         "next_check": next_check.strftime("%H:%M:%S"),
-        "bot": "GAG Stock Tracker (Discord Parser)",
+        "bot": "GAG Stock Tracker",
         "discord_status": discord_status,
-        "cache_size": len(user_autostocks_cache),
-        "subscription_cache_size": len(subscription_cache)
+        "cache_size": len(user_autostocks_cache)
     }), 200
 
 @flask_app.route("/health", methods=["GET"])
@@ -1108,14 +1058,13 @@ def health():
 
 # ========== MAIN ==========
 def main():
-    print("Starting bot.py...")
     logger.info("="*60)
     logger.info("🌱 GAG Stock Tracker Bot (Discord Parser)")
     logger.info("="*60)
 
     build_item_id_mappings()
 
-    # Запуск Discord клиента в отдельном потоке с собственным loop
+    # Discord клиент
     global discord_client
     discord_client = StockDiscordClient()
     
@@ -1127,9 +1076,8 @@ def main():
     
     discord_thread = threading.Thread(target=run_discord, daemon=True)
     discord_thread.start()
-    logger.info("🔄 Discord клиент запущен в фоне")
+    logger.info("🔄 Discord клиент запущен")
     
-    # Ждём 5 секунд чтобы Discord подключился
     import time
     time.sleep(5)
 
