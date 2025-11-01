@@ -616,11 +616,7 @@ parser = DiscordStockParser()
 # ========== DISCORD CLIENT ==========
 class StockDiscordClient(discord.Client):
     def __init__(self):
-        intents = discord.Intents.default()
-        intents.messages = True
-        intents.message_content = True
-        intents.guilds = True
-        super().__init__(intents=intents)
+        super().__init__()
     
     async def on_ready(self):
         logger.info(f'✅ Discord: Залогинен как {self.user}')
