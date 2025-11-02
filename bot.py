@@ -3,15 +3,12 @@ import logging
 import os
 import re
 import hashlib
-import threading
-import queue
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List, Set
 from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
 from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
-from flask import Flask, jsonify, request as flask_request
 import pytz
 from dotenv import load_dotenv
 import discord
@@ -151,9 +148,14 @@ user_autostocks_time: Dict[int, datetime] = {}
 user_cooldowns: Dict[int, Dict[str, datetime]] = {}
 subscription_cache: Dict[int, tuple] = {}
 
+# Кеш для стока
+cached_stock_data: Optional[Dict] = None
+cached_stock_time: Optional[datetime] = None
+STOCK_CACHE_TTL = 30  # 30 секунд
+
 AUTOSTOCK_CACHE_TTL = 180
 MAX_CACHE_SIZE = 15000
-COMMAND_COOLDOWN = 10
+COMMAND_COOLDOWN = 10  # 10 сек оптимально
 AUTOSTOCK_NOTIFICATION_COOLDOWN = 600
 SUBSCRIPTION_CACHE_TTL = 300
 
@@ -163,13 +165,10 @@ ID_TO_NAME: Dict[str, str] = {}
 SEED_ITEMS_LIST = [(name, info) for name, info in ITEMS_DATA.items() if info['category'] == 'seed']
 GEAR_ITEMS_LIST = [(name, info) for name, info in ITEMS_DATA.items() if info['category'] == 'gear']
 EGG_ITEMS_LIST = [(name, info) for name, info in ITEMS_DATA.items() if info['category'] == 'egg']
+EVENT_ITEMS_LIST = [(name, info) for name, info in ITEMS_DATA.items() if info['category'] == 'event']
 
 telegram_app: Optional[Application] = None
 discord_client: Optional[discord.Client] = None
-
-# Queue для межпоточного общения
-stock_request_queue = queue.Queue()
-stock_response_queue = queue.Queue()
 
 # ========== УТИЛИТЫ ==========
 def get_moscow_time() -> datetime:
@@ -338,7 +337,7 @@ class SupabaseDB:
                     return set()
         except Exception as e:
             logger.error(f"❌ Ошибка загрузки автостоков: {e}")
-            return set()
+            return user_autostocks_cache.get(user_id, set()).copy()
     
     async def save_user_autostock(self, user_id: int, item_name: str) -> bool:
         if user_id not in user_autostocks_cache:
@@ -394,7 +393,8 @@ class DiscordStockParser:
         self.db = SupabaseDB()
         self.telegram_bot: Optional[Bot] = None
     
-    def parse_stock_message(self, content: str) -> Dict:
+    def parse_stock_message(self, content: str, channel_name: str) -> Dict:
+        """Парсинг с учетом типа канала"""
         result = {
             "seeds": [],
             "gear": [],
@@ -403,6 +403,24 @@ class DiscordStockParser:
         }
         
         lines = content.split('\n')
+        
+        # Для event_content всё идёт в events
+        if channel_name == "event_content":
+            for line in lines:
+                line = line.strip()
+                if 'x' in line and not any(skip in line.lower() for skip in ['shop', 'stock', 'safari', 'updated', 'limited', 'today']):
+                    clean_line = re.sub(r'[•\*\-]', '', line)
+                    match = re.search(r'([A-Za-z\s\'\-]+?)\s+(\d+)x', clean_line)
+                    
+                    if match:
+                        item_name = match.group(1).strip()
+                        quantity = int(match.group(2))
+                        
+                        if quantity > 0 and item_name in EVENT_DATA:
+                            result['events'].append((item_name, quantity))
+            return result
+        
+        # Для остальных каналов
         current_section = None
         
         for line in lines:
@@ -418,7 +436,7 @@ class DiscordStockParser:
                 current_section = 'eggs'
                 continue
             elif 'COSMETICS STOCK' in line or 'Devilish Decor' in line:
-                current_section = 'events'
+                current_section = None  # Пропускаем косметику
                 continue
             
             if current_section and 'x' in line:
@@ -433,16 +451,6 @@ class DiscordStockParser:
                         result[current_section].append((item_name, quantity))
         
         return result
-    
-    def get_stock_sync(self) -> Optional[Dict]:
-        """Синхронный запрос стока через очередь"""
-        try:
-            stock_request_queue.put("fetch", timeout=1)
-            stock_data = stock_response_queue.get(timeout=15)
-            return stock_data if stock_data != "error" else None
-        except Exception as e:
-            logger.error(f"❌ get_stock_sync error: {e}")
-            return None
     
     def format_stock_message(self, stock_data: Dict) -> str:
         if not stock_data:
@@ -484,17 +492,17 @@ class DiscordStockParser:
         else:
             message += "🥚 *ЯЙЦА:* _Пусто_\n\n"
         
-        # Ивенты
+        # Ивент
         events = stock_data.get('events', [])
         if events:
-            message += "🌴 *ИВЕНТ:*\n"
+            message += "🌴 *SAFARI SHOP (ИВЕНТ):*\n"
             for item_name, quantity in events:
                 item_info = EVENT_DATA.get(item_name, {"emoji": "📦", "price": "?"})
                 message += f"{item_info['emoji']} {item_name} x{quantity}\n"
         else:
-            message += "📦 *ИВЕНТ:* _Пусто_"
+            message += "🌴 *SAFARI SHOP:* _Пусто_"
         
-        message += f"\n🕒 {current_time} МСК"
+        message += f"\n\n🕒 {current_time} МСК"
         return message
     
     async def send_notification(self, bot: Bot, channel_id: str, item_name: str, count: int):
@@ -615,7 +623,11 @@ parser = DiscordStockParser()
 # ========== DISCORD CLIENT ==========
 class StockDiscordClient(discord.Client):
     def __init__(self):
-        super().__init__()
+        intents = discord.Intents.default()
+        intents.message_content = True
+        super().__init__(intents=intents)
+        self.stock_data_cache = None
+        self.stock_lock = asyncio.Lock()
     
     async def on_ready(self):
         logger.info(f'✅ Discord: Залогинен как {self.user}')
@@ -626,81 +638,79 @@ class StockDiscordClient(discord.Client):
                 logger.info(f"✅ Канал {channel_name}: {channel.name}")
             else:
                 logger.error(f"❌ Канал {channel_name} недоступен")
+    
+    async def fetch_stock_data(self) -> Dict:
+        """Быстрое получение стока с кешем"""
+        global cached_stock_data, cached_stock_time
         
-        # Запускаем обработчик запросов
-        asyncio.create_task(self.stock_request_handler())
-    
-    async def stock_request_handler(self):
-        """Обработчик запросов стока в Discord loop"""
-        while True:
+        now = get_moscow_time()
+        
+        # Используем кеш если свежий
+        if cached_stock_data and cached_stock_time:
+            if (now - cached_stock_time).total_seconds() < STOCK_CACHE_TTL:
+                return cached_stock_data
+        
+        async with self.stock_lock:
+            # Двойная проверка после получения блокировки
+            if cached_stock_data and cached_stock_time:
+                if (now - cached_stock_time).total_seconds() < STOCK_CACHE_TTL:
+                    return cached_stock_data
+            
             try:
-                # Проверяем очередь без блокировки
-                try:
-                    request = stock_request_queue.get_nowait()
-                    if request == "fetch":
-                        stock_data = await self.fetch_stock_internal()
-                        stock_response_queue.put(stock_data)
-                except queue.Empty:
-                    pass
+                stock_data = {
+                    "seeds": [],
+                    "gear": [],
+                    "eggs": [],
+                    "events": []
+                }
                 
-                await asyncio.sleep(0.1)
-            except Exception as e:
-                logger.error(f"❌ Ошибка stock_request_handler: {e}")
-                await asyncio.sleep(1)
-    
-    async def fetch_stock_internal(self) -> Dict:
-        """Получение стока внутри Discord loop"""
-        try:
-            stock_data = {
-                "seeds": [],
-                "gear": [],
-                "eggs": [],
-                "events": []
-            }
-            
-            for channel_name, channel_id in DISCORD_CHANNELS.items():
-                try:
-                    channel = self.get_channel(channel_id)
-                    if not channel:
-                        continue
-                    
-                    messages = []
-                    async for msg in channel.history(limit=2):
-                        messages.append(msg)
-                        if len(messages) >= 2:
-                            break
-                    
-                    for msg in messages:
-                        if msg.author.bot and ('Vulcan' in msg.author.name or 'Dawn' in msg.author.name):
-                            content_to_parse = ""
-                            
-                            if msg.embeds:
-                                for embed in msg.embeds:
-                                    if embed.description:
-                                        content_to_parse += embed.description + "\n"
-                                    for field in embed.fields:
-                                        content_to_parse += f"{field.name}\n{field.value}\n"
-                            
-                            if msg.content:
-                                content_to_parse += msg.content
-                            
-                            if content_to_parse:
-                                parsed = parser.parse_stock_message(content_to_parse)
-                                
-                                for category in parsed:
-                                    stock_data[category].extend(parsed[category])
-                                
+                for channel_name, channel_id in DISCORD_CHANNELS.items():
+                    try:
+                        channel = self.get_channel(channel_id)
+                        if not channel:
+                            continue
+                        
+                        messages = []
+                        async for msg in channel.history(limit=2):
+                            messages.append(msg)
+                            if len(messages) >= 2:
                                 break
+                        
+                        for msg in messages:
+                            if msg.author.bot and ('Vulcan' in msg.author.name or 'Dawn' in msg.author.name):
+                                content_to_parse = ""
+                                
+                                if msg.embeds:
+                                    for embed in msg.embeds:
+                                        if embed.description:
+                                            content_to_parse += embed.description + "\n"
+                                        for field in embed.fields:
+                                            content_to_parse += f"{field.name}\n{field.value}\n"
+                                
+                                if msg.content:
+                                    content_to_parse += msg.content
+                                
+                                if content_to_parse:
+                                    parsed = parser.parse_stock_message(content_to_parse, channel_name)
+                                    
+                                    for category in parsed:
+                                        stock_data[category].extend(parsed[category])
+                                    
+                                    break
+                    
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка парсинга {channel_name}: {e}")
+                        continue
                 
-                except Exception as e:
-                    logger.error(f"❌ Ошибка парсинга {channel_name}: {e}")
-                    continue
-            
-            return stock_data
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка fetch_stock_internal: {e}")
-            return {"seeds": [], "gear": [], "eggs": [], "events": []}
+                # Обновляем кеш
+                cached_stock_data = stock_data
+                cached_stock_time = get_moscow_time()
+                
+                return stock_data
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка fetch_stock_data: {e}")
+                return cached_stock_data or {"seeds": [], "gear": [], "eggs": [], "events": []}
 
 # ========== КОМАНДЫ TELEGRAM БОТА ==========
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -762,7 +772,8 @@ async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    stock_data = parser.get_stock_sync()
+    # Быстрое получение стока
+    stock_data = await discord_client.fetch_stock_data()
     message = parser.format_stock_message(stock_data)
     await update.effective_message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
@@ -791,6 +802,7 @@ async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🌱 Семена", callback_data="as_seeds")],
         [InlineKeyboardButton("⚔️ Гиры", callback_data="as_gear")],
         [InlineKeyboardButton("🥚 Яйца", callback_data="as_eggs")],
+        [InlineKeyboardButton("🌴 Safari Shop", callback_data="as_events")],
         [InlineKeyboardButton("📋 Мои автостоки", callback_data="as_list")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -837,7 +849,7 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     try:
         if data == "as_seeds":
-            user_items = await parser.db.load_user_autostocks(user_id, use_cache=True)
+            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
             keyboard = []
             for item_name, item_info in SEED_ITEMS_LIST:
                 is_tracking = item_name in user_items
@@ -852,7 +864,7 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.edit_message_text("🌱 *СЕМЕНА*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         
         elif data == "as_gear":
-            user_items = await parser.db.load_user_autostocks(user_id, use_cache=True)
+            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
             keyboard = []
             for item_name, item_info in GEAR_ITEMS_LIST:
                 is_tracking = item_name in user_items
@@ -867,7 +879,7 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.edit_message_text("⚔️ *ГИРЫ*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         
         elif data == "as_eggs":
-            user_items = await parser.db.load_user_autostocks(user_id, use_cache=True)
+            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
             keyboard = []
             for item_name, item_info in EGG_ITEMS_LIST:
                 is_tracking = item_name in user_items
@@ -881,8 +893,23 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text("🥚 *ЯЙЦА*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         
+        elif data == "as_events":
+            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
+            keyboard = []
+            for item_name, item_info in EVENT_ITEMS_LIST:
+                is_tracking = item_name in user_items
+                status = "✅" if is_tracking else "➕"
+                safe_callback = NAME_TO_ID.get(item_name, "invalid")
+                keyboard.append([InlineKeyboardButton(
+                    f"{status} {item_info['emoji']} {item_name}",
+                    callback_data=safe_callback
+                )])
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("🌴 *SAFARI SHOP*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        
         elif data == "as_list":
-            user_items = await parser.db.load_user_autostocks(user_id, use_cache=True)
+            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
             if not user_items:
                 message = "📋 *МОИ АВТОСТОКИ*\n\n_Нет отслеживаемых предметов_"
             else:
@@ -901,6 +928,7 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 [InlineKeyboardButton("🌱 Семена", callback_data="as_seeds")],
                 [InlineKeyboardButton("⚔️ Гиры", callback_data="as_gear")],
                 [InlineKeyboardButton("🥚 Яйца", callback_data="as_eggs")],
+                [InlineKeyboardButton("🌴 Safari Shop", callback_data="as_events")],
                 [InlineKeyboardButton("📋 Мои автостоки", callback_data="as_list")],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -913,21 +941,31 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 return
             
             category = ITEMS_DATA.get(item_name, {}).get('category', 'seed')
-            user_items = await parser.db.load_user_autostocks(user_id, use_cache=True)
+            
+            # Загружаем свежие данные без кеша
+            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
             
             if item_name in user_items:
-                user_items.discard(item_name)
-                asyncio.create_task(parser.db.remove_user_autostock(user_id, item_name))
+                success = await parser.db.remove_user_autostock(user_id, item_name)
+                if success:
+                    user_items.discard(item_name)
             else:
-                user_items.add(item_name)
-                asyncio.create_task(parser.db.save_user_autostock(user_id, item_name))
+                success = await parser.db.save_user_autostock(user_id, item_name)
+                if success:
+                    user_items.add(item_name)
             
             if category == 'seed':
                 items_list = SEED_ITEMS_LIST
+                header = "🌱 *СЕМЕНА*\n\nВыберите предметы:"
             elif category == 'gear':
                 items_list = GEAR_ITEMS_LIST
+                header = "⚔️ *ГИРЫ*\n\nВыберите предметы:"
+            elif category == 'event':
+                items_list = EVENT_ITEMS_LIST
+                header = "🌴 *SAFARI SHOP*\n\nВыберите предметы:"
             else:
                 items_list = EGG_ITEMS_LIST
+                header = "🥚 *ЯЙЦА*\n\nВыберите предметы:"
             
             keyboard = []
             for name, info in items_list:
@@ -942,7 +980,7 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             try:
-                await query.edit_message_reply_markup(reply_markup=reply_markup)
+                await query.edit_message_text(header, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
             except TelegramError:
                 pass
     
@@ -985,6 +1023,7 @@ async def periodic_stock_check(application: Application):
     
     try:
         initial_sleep = calculate_sleep_time()
+        logger.info(f"⏰ Ожидание до первой проверки: {int(initial_sleep)}с")
         await asyncio.sleep(initial_sleep)
 
         check_count = 0
@@ -997,7 +1036,7 @@ async def periodic_stock_check(application: Application):
                 if check_count % 12 == 0:
                     _cleanup_cache()
                 
-                stock_data = parser.get_stock_sync()
+                stock_data = await discord_client.fetch_stock_data()
                 
                 if stock_data:
                     tasks = []
@@ -1008,6 +1047,7 @@ async def periodic_stock_check(application: Application):
                     await asyncio.gather(*tasks, return_exceptions=True)
                 
                 sleep_time = calculate_sleep_time()
+                logger.info(f"💤 Следующая проверка через {int(sleep_time)}с")
                 await asyncio.sleep(sleep_time)
             except asyncio.CancelledError:
                 break
@@ -1022,39 +1062,10 @@ async def periodic_stock_check(application: Application):
 async def post_init(application: Application):
     asyncio.create_task(periodic_stock_check(application))
 
-# ========== FLASK ==========
-flask_app = Flask(__name__)
-
-@flask_app.route("/", methods=["GET", "HEAD"])
-@flask_app.route("/ping", methods=["GET", "HEAD"])
-def ping():
-    if flask_request.method == "HEAD":
-        return "", 200
-    
-    now = get_moscow_time()
-    next_check = get_next_check_time()
-    
-    discord_status = "connected" if discord_client and discord_client.is_ready() else "disconnected"
-    
-    return jsonify({
-        "status": "ok",
-        "time": datetime.now(pytz.UTC).isoformat(),
-        "moscow_time": now.strftime("%H:%M:%S"),
-        "next_check": next_check.strftime("%H:%M:%S"),
-        "bot": "GAG Stock Tracker",
-        "discord_status": discord_status,
-        "cache_size": len(user_autostocks_cache)
-    }), 200
-
-@flask_app.route("/health", methods=["GET"])
-def health():
-    discord_ready = discord_client and discord_client.is_ready()
-    return jsonify({"status": "healthy", "discord_ready": discord_ready}), 200
-
 # ========== MAIN ==========
 def main():
     logger.info("="*60)
-    logger.info("🌱 GAG Stock Tracker Bot (Discord Parser)")
+    logger.info("🌱 GAG Stock Tracker Bot v2.0")
     logger.info("="*60)
 
     build_item_id_mappings()
@@ -1063,19 +1074,6 @@ def main():
     global discord_client
     discord_client = StockDiscordClient()
     
-    def run_discord():
-        try:
-            discord_client.run(DISCORD_TOKEN)
-        except Exception as e:
-            logger.error(f"❌ Discord ошибка: {e}")
-    
-    discord_thread = threading.Thread(target=run_discord, daemon=True)
-    discord_thread.start()
-    logger.info("🔄 Discord клиент запущен")
-    
-    import time
-    time.sleep(5)
-
     # Telegram бот
     global telegram_app
     telegram_app = Application.builder().token(BOT_TOKEN).build()
@@ -1096,22 +1094,39 @@ def main():
 
     telegram_app.post_shutdown = shutdown_callback
 
-    logger.info("🔄 Режим: Polling + Discord Parser")
+    # Запускаем оба клиента в одном event loop
+    async def run_both():
+        # Запускаем Discord
+        discord_task = asyncio.create_task(discord_client.start(DISCORD_TOKEN))
+        
+        # Ждем пока Discord будет готов
+        while not discord_client.is_ready():
+            await asyncio.sleep(0.5)
+        
+        logger.info("✅ Discord готов, запускаем Telegram...")
+        
+        # Запускаем Telegram
+        await telegram_app.initialize()
+        await telegram_app.start()
+        await telegram_app.updater.start_polling(allowed_updates=None, drop_pending_updates=True)
+        
+        logger.info("🚀 Бот полностью запущен!")
+        logger.info("="*60)
+        
+        # Ждем завершения
+        try:
+            await discord_task
+        except KeyboardInterrupt:
+            pass
+        finally:
+            await telegram_app.updater.stop()
+            await telegram_app.stop()
+            await telegram_app.shutdown()
     
-    def run_flask_server():
-        port = int(os.getenv("PORT", "10000"))
-        logger.info(f"🚀 Flask запущен на порту {port}")
-        import logging as flask_logging
-        flask_log = flask_logging.getLogger('werkzeug')
-        flask_log.setLevel(flask_logging.ERROR)
-        flask_app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False)
-    
-    flask_thread = threading.Thread(target=run_flask_server, daemon=True)
-    flask_thread.start()
-    
-    logger.info("🚀 Бот запущен!")
-    logger.info("="*60)
-    telegram_app.run_polling(allowed_updates=None, drop_pending_updates=True)
+    try:
+        asyncio.run(run_both())
+    except KeyboardInterrupt:
+        logger.info("⚠️ Получен сигнал остановки")
 
 if __name__ == "__main__":
     main()
