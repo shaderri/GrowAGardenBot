@@ -890,21 +890,6 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text("🥚 *ЯЙЦА*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         
-        elif data == "as_events":
-            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
-            keyboard = []
-            for item_name, item_info in EVENT_ITEMS_LIST:
-                is_tracking = item_name in user_items
-                status = "✅" if is_tracking else "➕"
-                safe_callback = NAME_TO_ID.get(item_name, "invalid")
-                keyboard.append([InlineKeyboardButton(
-                    f"{status} {item_info['emoji']} {item_name}",
-                    callback_data=safe_callback
-                )])
-            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text("🌴 *SAFARI SHOP*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-        
         elif data == "as_list":
             user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
             if not user_items:
@@ -925,7 +910,6 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 [InlineKeyboardButton("🌱 Семена", callback_data="as_seeds")],
                 [InlineKeyboardButton("⚔️ Гиры", callback_data="as_gear")],
                 [InlineKeyboardButton("🥚 Яйца", callback_data="as_eggs")],
-                [InlineKeyboardButton("🌴 Safari Shop", callback_data="as_events")],
                 [InlineKeyboardButton("📋 Мои автостоки", callback_data="as_list")],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -935,6 +919,7 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         elif data.startswith("t_"):
             item_name = ID_TO_NAME.get(data)
             if not item_name:
+                await query.answer("❌ Неизвестный предмет", show_alert=True)
                 return
             
             category = ITEMS_DATA.get(item_name, {}).get('category', 'seed')
@@ -942,28 +927,35 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             # Загружаем свежие данные без кеша
             user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
             
-            if item_name in user_items:
+            # Переключаем состояние
+            is_currently_tracked = item_name in user_items
+            
+            if is_currently_tracked:
                 success = await parser.db.remove_user_autostock(user_id, item_name)
                 if success:
                     user_items.discard(item_name)
+                    await query.answer(f"❌ {item_name} удален")
+                else:
+                    await query.answer("⚠️ Ошибка удаления", show_alert=True)
+                    return
             else:
                 success = await parser.db.save_user_autostock(user_id, item_name)
                 if success:
                     user_items.add(item_name)
+                    await query.answer(f"✅ {item_name} добавлен")
+                else:
+                    await query.answer("⚠️ Ошибка сохранения", show_alert=True)
+                    return
             
+            # Определяем категорию и список
             if category == 'seed':
                 items_list = SEED_ITEMS_LIST
-                header = "🌱 *СЕМЕНА*\n\nВыберите предметы:"
             elif category == 'gear':
                 items_list = GEAR_ITEMS_LIST
-                header = "⚔️ *ГИРЫ*\n\nВыберите предметы:"
-            elif category == 'event':
-                items_list = EVENT_ITEMS_LIST
-                header = "🌴 *SAFARI SHOP*\n\nВыберите предметы:"
-            else:
+            else:  # egg
                 items_list = EGG_ITEMS_LIST
-                header = "🥚 *ЯЙЦА*\n\nВыберите предметы:"
             
+            # Строим новую клавиатуру
             keyboard = []
             for name, info in items_list:
                 is_tracking = name in user_items
@@ -976,10 +968,11 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
             reply_markup = InlineKeyboardMarkup(keyboard)
             
+            # Обновляем ТОЛЬКО клавиатуру, не трогая текст
             try:
-                await query.edit_message_text(header, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-            except TelegramError:
-                pass
+                await query.edit_message_reply_markup(reply_markup=reply_markup)
+            except TelegramError as e:
+                logger.error(f"❌ Ошибка обновления клавиатуры: {e}")
     
     except Exception as e:
         logger.error(f"❌ Ошибка в autostock_callback: {e}")
