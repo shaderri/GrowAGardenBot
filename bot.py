@@ -39,7 +39,7 @@ DISCORD_CHANNELS = {
 CHECK_INTERVAL_MINUTES = 5
 CHECK_DELAY_SECONDS = 10
 
-RAREST_SEEDS = ["Crimson Thorn", "Great Pumpkin"]
+RAREST_SEEDS = ["Crimson Thorn"]
 
 if not BOT_TOKEN or not DISCORD_TOKEN:
     raise ValueError("BOT_TOKEN и DISCORD_TOKEN должны быть установлены!")
@@ -924,30 +924,54 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             
             category = ITEMS_DATA.get(item_name, {}).get('category', 'seed')
             
-            # Загружаем свежие данные без кеша
-            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
+            # Загружаем текущее состояние из БД
+            try:
+                user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
+            except Exception as e:
+                logger.error(f"❌ Ошибка загрузки автостоков для {user_id}: {e}")
+                await query.answer("⚠️ Ошибка загрузки данных", show_alert=True)
+                return
             
             # Переключаем состояние
             is_currently_tracked = item_name in user_items
             
-            if is_currently_tracked:
-                success = await parser.db.remove_user_autostock(user_id, item_name)
-                if success:
-                    user_items.discard(item_name)
-                    await query.answer(f"❌ {item_name} удален")
+            try:
+                if is_currently_tracked:
+                    # Удаляем
+                    success = await parser.db.remove_user_autostock(user_id, item_name)
+                    if success:
+                        # Обновляем локальный кеш
+                        if user_id in user_autostocks_cache:
+                            user_autostocks_cache[user_id].discard(item_name)
+                        await query.answer(f"❌ {item_name} удален")
+                    else:
+                        await query.answer("⚠️ Ошибка удаления", show_alert=True)
+                        return
                 else:
-                    await query.answer("⚠️ Ошибка удаления", show_alert=True)
-                    return
-            else:
-                success = await parser.db.save_user_autostock(user_id, item_name)
-                if success:
-                    user_items.add(item_name)
-                    await query.answer(f"✅ {item_name} добавлен")
-                else:
-                    await query.answer("⚠️ Ошибка сохранения", show_alert=True)
-                    return
+                    # Добавляем
+                    success = await parser.db.save_user_autostock(user_id, item_name)
+                    if success:
+                        # Обновляем локальный кеш
+                        if user_id not in user_autostocks_cache:
+                            user_autostocks_cache[user_id] = set()
+                        user_autostocks_cache[user_id].add(item_name)
+                        await query.answer(f"✅ {item_name} добавлен")
+                    else:
+                        await query.answer("⚠️ Ошибка сохранения", show_alert=True)
+                        return
+            except Exception as e:
+                logger.error(f"❌ Ошибка сохранения/удаления для {user_id}, {item_name}: {e}")
+                await query.answer("⚠️ Ошибка операции", show_alert=True)
+                return
             
-            # Определяем категорию и список
+            # Загружаем обновленное состояние
+            try:
+                user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
+            except Exception as e:
+                logger.error(f"❌ Ошибка повторной загрузки для {user_id}: {e}")
+                return
+            
+            # Определяем список предметов
             if category == 'seed':
                 items_list = SEED_ITEMS_LIST
             elif category == 'gear':
@@ -968,11 +992,13 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            # Обновляем ТОЛЬКО клавиатуру, не трогая текст
+            # Обновляем клавиатуру
             try:
                 await query.edit_message_reply_markup(reply_markup=reply_markup)
+                logger.info(f"✅ Обновлена клавиатура для {user_id}, {item_name}")
             except TelegramError as e:
-                logger.error(f"❌ Ошибка обновления клавиатуры: {e}")
+                logger.error(f"❌ Ошибка обновления клавиатуры для {user_id}: {e}")
+                pass
     
     except Exception as e:
         logger.error(f"❌ Ошибка в autostock_callback: {e}")
