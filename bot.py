@@ -155,7 +155,7 @@ STOCK_CACHE_TTL = 30  # 30 секунд
 
 AUTOSTOCK_CACHE_TTL = 180
 MAX_CACHE_SIZE = 15000
-COMMAND_COOLDOWN = 10  # 10 сек оптимально
+COMMAND_COOLDOWN = 3  # Уменьшен до 3 секунд
 AUTOSTOCK_NOTIFICATION_COOLDOWN = 600
 SUBSCRIPTION_CACHE_TTL = 300
 
@@ -623,9 +623,7 @@ parser = DiscordStockParser()
 # ========== DISCORD CLIENT ==========
 class StockDiscordClient(discord.Client):
     def __init__(self):
-        intents = discord.Intents.default()
-        intents.message_content = True
-        super().__init__(intents=intents)
+        super().__init__()
         self.stock_data_cache = None
         self.stock_lock = asyncio.Lock()
     
