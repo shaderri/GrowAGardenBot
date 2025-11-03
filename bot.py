@@ -800,7 +800,6 @@ async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🌱 Семена", callback_data="as_seeds")],
         [InlineKeyboardButton("⚔️ Гиры", callback_data="as_gear")],
         [InlineKeyboardButton("🥚 Яйца", callback_data="as_eggs")],
-        [InlineKeyboardButton("🌴 Safari Shop", callback_data="as_events")],
         [InlineKeyboardButton("📋 Мои автостоки", callback_data="as_list")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
