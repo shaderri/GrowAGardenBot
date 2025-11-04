@@ -83,7 +83,6 @@ SEEDS_DATA = {
     "Elder Strawberry": {"emoji": "🍓", "price": "70,000,000"},
     "Romanesco": {"emoji": "🥦", "price": "88,000,000"},
     "Crimson Thorn": {"emoji": "🌹", "price": "10B"},
-    "Great Pumpkin": {"emoji": "🎃", "price": "1T"},
     "Broccoli": {"emoji": "🥦", "price": "600"},
     "Potato": {"emoji": "🥔", "price": "500"},
     "Cocomango": {"emoji": "🥥", "price": "5,000"},
@@ -151,11 +150,11 @@ subscription_cache: Dict[int, tuple] = {}
 # Кеш для стока
 cached_stock_data: Optional[Dict] = None
 cached_stock_time: Optional[datetime] = None
-STOCK_CACHE_TTL = 30  # 30 секунд
+STOCK_CACHE_TTL = 30
 
 AUTOSTOCK_CACHE_TTL = 180
 MAX_CACHE_SIZE = 15000
-COMMAND_COOLDOWN = 3  # Уменьшен до 3 секунд
+COMMAND_COOLDOWN = 3
 AUTOSTOCK_NOTIFICATION_COOLDOWN = 600
 SUBSCRIPTION_CACHE_TTL = 300
 
@@ -165,7 +164,6 @@ ID_TO_NAME: Dict[str, str] = {}
 SEED_ITEMS_LIST = [(name, info) for name, info in ITEMS_DATA.items() if info['category'] == 'seed']
 GEAR_ITEMS_LIST = [(name, info) for name, info in ITEMS_DATA.items() if info['category'] == 'gear']
 EGG_ITEMS_LIST = [(name, info) for name, info in ITEMS_DATA.items() if info['category'] == 'egg']
-EVENT_ITEMS_LIST = [(name, info) for name, info in ITEMS_DATA.items() if info['category'] == 'event']
 
 telegram_app: Optional[Application] = None
 discord_client: Optional[discord.Client] = None
@@ -333,6 +331,7 @@ class SupabaseDB:
                         user_autostocks_cache[user_id] = items_set
                         user_autostocks_time[user_id] = get_moscow_time()
                         
+                        logger.info(f"📥 Загружено {len(items_set)} автостоков для {user_id}")
                         return items_set
                     return set()
         except Exception as e:
@@ -340,34 +339,31 @@ class SupabaseDB:
             return user_autostocks_cache.get(user_id, set()).copy()
     
     async def save_user_autostock(self, user_id: int, item_name: str) -> bool:
-        if user_id not in user_autostocks_cache:
-            user_autostocks_cache[user_id] = set()
-        user_autostocks_cache[user_id].add(item_name)
-        user_autostocks_time[user_id] = get_moscow_time()
-        
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
                 data = {"user_id": user_id, "item_name": item_name}
                 
                 async with session.post(AUTOSTOCKS_URL, json=data, headers=self.headers, timeout=5) as response:
-                    return response.status in [200, 201]
+                    success = response.status in [200, 201]
+                    if success:
+                        logger.info(f"💾 Сохранен автосток: {user_id} -> {item_name}")
+                    return success
         except Exception as e:
             logger.error(f"❌ Ошибка сохранения: {e}")
             return False
     
     async def remove_user_autostock(self, user_id: int, item_name: str) -> bool:
-        if user_id in user_autostocks_cache:
-            user_autostocks_cache[user_id].discard(item_name)
-            user_autostocks_time[user_id] = get_moscow_time()
-        
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
                 params = {"user_id": f"eq.{user_id}", "item_name": f"eq.{item_name}"}
                 
                 async with session.delete(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=5) as response:
-                    return response.status in [200, 204]
+                    success = response.status in [200, 204]
+                    if success:
+                        logger.info(f"🗑️ Удален автосток: {user_id} -> {item_name}")
+                    return success
         except Exception as e:
             logger.error(f"❌ Ошибка удаления: {e}")
             return False
@@ -436,7 +432,7 @@ class DiscordStockParser:
                 current_section = 'eggs'
                 continue
             elif 'COSMETICS STOCK' in line or 'Devilish Decor' in line:
-                current_section = None  # Пропускаем косметику
+                current_section = None
                 continue
             
             if current_section and 'x' in line:
@@ -643,13 +639,11 @@ class StockDiscordClient(discord.Client):
         
         now = get_moscow_time()
         
-        # Используем кеш если свежий
         if cached_stock_data and cached_stock_time:
             if (now - cached_stock_time).total_seconds() < STOCK_CACHE_TTL:
                 return cached_stock_data
         
         async with self.stock_lock:
-            # Двойная проверка после получения блокировки
             if cached_stock_data and cached_stock_time:
                 if (now - cached_stock_time).total_seconds() < STOCK_CACHE_TTL:
                     return cached_stock_data
@@ -700,7 +694,6 @@ class StockDiscordClient(discord.Client):
                         logger.error(f"❌ Ошибка парсинга {channel_name}: {e}")
                         continue
                 
-                # Обновляем кеш
                 cached_stock_data = stock_data
                 cached_stock_time = get_moscow_time()
                 
@@ -770,7 +763,6 @@ async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Быстрое получение стока
     stock_data = await discord_client.fetch_stock_data()
     message = parser.format_stock_message(stock_data)
     await update.effective_message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
@@ -814,9 +806,9 @@ async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     
     if not update.effective_user:
+        await query.answer()
         return
     
     user_id = update.effective_user.id
@@ -858,6 +850,7 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )])
             keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
             reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.answer()
             await query.edit_message_text("🌱 *СЕМЕНА*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         
         elif data == "as_gear":
@@ -873,6 +866,7 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )])
             keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
             reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.answer()
             await query.edit_message_text("⚔️ *ГИРЫ*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         
         elif data == "as_eggs":
@@ -888,6 +882,7 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )])
             keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
             reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.answer()
             await query.edit_message_text("🥚 *ЯЙЦА*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         
         elif data == "as_list":
@@ -903,6 +898,7 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             
             keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="as_back")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.answer()
             await query.edit_message_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         
         elif data == "as_back":
@@ -914,6 +910,7 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             message = "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\nВыберите категорию."
+            await query.answer()
             await query.edit_message_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         
         elif data.startswith("t_"):
@@ -924,62 +921,40 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             
             category = ITEMS_DATA.get(item_name, {}).get('category', 'seed')
             
-            # Загружаем текущее состояние из БД
-            try:
-                user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
-            except Exception as e:
-                logger.error(f"❌ Ошибка загрузки автостоков для {user_id}: {e}")
-                await query.answer("⚠️ Ошибка загрузки данных", show_alert=True)
-                return
-            
-            # Переключаем состояние
+            # Загружаем текущее состояние
+            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
             is_currently_tracked = item_name in user_items
             
-            try:
-                if is_currently_tracked:
-                    # Удаляем
-                    success = await parser.db.remove_user_autostock(user_id, item_name)
-                    if success:
-                        # Обновляем локальный кеш
-                        if user_id in user_autostocks_cache:
-                            user_autostocks_cache[user_id].discard(item_name)
-                        await query.answer(f"❌ {item_name} удален")
-                    else:
-                        await query.answer("⚠️ Ошибка удаления", show_alert=True)
-                        return
+            # Выполняем операцию
+            if is_currently_tracked:
+                success = await parser.db.remove_user_autostock(user_id, item_name)
+                if success:
+                    user_autostocks_cache.pop(user_id, None)  # Сбрасываем кеш
+                    await query.answer(f"❌ {item_name} удален")
                 else:
-                    # Добавляем
-                    success = await parser.db.save_user_autostock(user_id, item_name)
-                    if success:
-                        # Обновляем локальный кеш
-                        if user_id not in user_autostocks_cache:
-                            user_autostocks_cache[user_id] = set()
-                        user_autostocks_cache[user_id].add(item_name)
-                        await query.answer(f"✅ {item_name} добавлен")
-                    else:
-                        await query.answer("⚠️ Ошибка сохранения", show_alert=True)
-                        return
-            except Exception as e:
-                logger.error(f"❌ Ошибка сохранения/удаления для {user_id}, {item_name}: {e}")
-                await query.answer("⚠️ Ошибка операции", show_alert=True)
-                return
+                    await query.answer("⚠️ Ошибка удаления", show_alert=True)
+                    return
+            else:
+                success = await parser.db.save_user_autostock(user_id, item_name)
+                if success:
+                    user_autostocks_cache.pop(user_id, None)  # Сбрасываем кеш
+                    await query.answer(f"✅ {item_name} добавлен")
+                else:
+                    await query.answer("⚠️ Ошибка сохранения", show_alert=True)
+                    return
             
             # Загружаем обновленное состояние
-            try:
-                user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
-            except Exception as e:
-                logger.error(f"❌ Ошибка повторной загрузки для {user_id}: {e}")
-                return
+            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
             
-            # Определяем список предметов
+            # Определяем список
             if category == 'seed':
                 items_list = SEED_ITEMS_LIST
             elif category == 'gear':
                 items_list = GEAR_ITEMS_LIST
-            else:  # egg
+            else:
                 items_list = EGG_ITEMS_LIST
             
-            # Строим новую клавиатуру
+            # Строим клавиатуру
             keyboard = []
             for name, info in items_list:
                 is_tracking = name in user_items
@@ -995,13 +970,13 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             # Обновляем клавиатуру
             try:
                 await query.edit_message_reply_markup(reply_markup=reply_markup)
-                logger.info(f"✅ Обновлена клавиатура для {user_id}, {item_name}")
+                logger.info(f"✅ Клавиатура обновлена: {user_id} -> {item_name} (tracked: {item_name in user_items})")
             except TelegramError as e:
-                logger.error(f"❌ Ошибка обновления клавиатуры для {user_id}: {e}")
-                pass
+                logger.error(f"❌ Ошибка обновления клавиатуры: {e}")
     
     except Exception as e:
         logger.error(f"❌ Ошибка в autostock_callback: {e}")
+        await query.answer("⚠️ Произошла ошибка", show_alert=True)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_user:
@@ -1081,16 +1056,14 @@ async def post_init(application: Application):
 # ========== MAIN ==========
 def main():
     logger.info("="*60)
-    logger.info("🌱 GAG Stock Tracker Bot v2.0")
+    logger.info("🌱 GAG Stock Tracker Bot v2.0 FINAL")
     logger.info("="*60)
 
     build_item_id_mappings()
 
-    # Discord клиент
     global discord_client
     discord_client = StockDiscordClient()
     
-    # Telegram бот
     global telegram_app
     telegram_app = Application.builder().token(BOT_TOKEN).build()
 
@@ -1110,18 +1083,14 @@ def main():
 
     telegram_app.post_shutdown = shutdown_callback
 
-    # Запускаем оба клиента в одном event loop
     async def run_both():
-        # Запускаем Discord
         discord_task = asyncio.create_task(discord_client.start(DISCORD_TOKEN))
         
-        # Ждем пока Discord будет готов
         while not discord_client.is_ready():
             await asyncio.sleep(0.5)
         
         logger.info("✅ Discord готов, запускаем Telegram...")
         
-        # Запускаем Telegram
         await telegram_app.initialize()
         await telegram_app.start()
         await telegram_app.updater.start_polling(allowed_updates=None, drop_pending_updates=True)
@@ -1129,7 +1098,6 @@ def main():
         logger.info("🚀 Бот полностью запущен!")
         logger.info("="*60)
         
-        # Ждем завершения
         try:
             await discord_task
         except KeyboardInterrupt:
