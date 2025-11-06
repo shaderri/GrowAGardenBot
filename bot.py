@@ -23,7 +23,7 @@ CHANNEL_ID = os.getenv("CHANNEL_ID", "@GroowAGarden")
 CHANNEL_USERNAME = "GroowAGarden"
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://tcsmfiixhflzrxkrbslk.supabase.co")
-SUPABASE_API_KEY = os.getenv("SUPABASE_KEY", "")
+SUPABASE_API_KEY = os.getenv("SUPABASE_KEY")
 
 AUTOSTOCKS_URL = f"{SUPABASE_URL}/rest/v1/user_autostocks"
 USERS_URL = f"{SUPABASE_URL}/rest/v1/users"
