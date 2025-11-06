@@ -12,6 +12,7 @@ from telegram.error import TelegramError
 import pytz
 from dotenv import load_dotenv
 import discord
+import aiohttp
 
 load_dotenv()
 
@@ -21,24 +22,20 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@GroowAGarden")
 CHANNEL_USERNAME = "GroowAGarden"
 
-# Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://tcsmfiixhflzrxkrbslk.supabase.co")
 SUPABASE_API_KEY = os.getenv("SUPABASE_KEY", "")
 
 AUTOSTOCKS_URL = f"{SUPABASE_URL}/rest/v1/user_autostocks"
 USERS_URL = f"{SUPABASE_URL}/rest/v1/users"
 
-# Discord каналы
 DISCORD_CHANNELS = {
     "stock": 1373218015042207804,
     "egg_stock": 1373218102313091072,
-    "cosmetics_stock": 1376539587949887499,
     "event_content": 1396257564311949503,
 }
 
 CHECK_INTERVAL_MINUTES = 5
 CHECK_DELAY_SECONDS = 10
-
 RAREST_SEEDS = ["Crimson Thorn"]
 
 if not BOT_TOKEN or not DISCORD_TOKEN:
@@ -50,9 +47,8 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-discord_logger = logging.getLogger('discord')
-discord_logger.setLevel(logging.WARNING)
+logging.getLogger('discord').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
 
 # ========== ДАННЫЕ ПРЕДМЕТОВ ==========
 SEEDS_DATA = {
@@ -73,15 +69,15 @@ SEEDS_DATA = {
     "Mango": {"emoji": "🥭", "price": "100,000"},
     "Grape": {"emoji": "🍇", "price": "850,000"},
     "Mushroom": {"emoji": "🍄", "price": "150,000"},
-    "Pepper": {"emoji": "🌶️", "price": "1,000,000"},
-    "Cacao": {"emoji": "🍫", "price": "2,500,000"},
-    "Beanstalk": {"emoji": "🪜", "price": "10,000,000"},
-    "Ember Lily": {"emoji": "🔥", "price": "15,000,000"},
-    "Sugar Apple": {"emoji": "🍎", "price": "25,000,000"},
-    "Burning Bud": {"emoji": "🔥", "price": "40,000,000"},
-    "Giant Pinecone": {"emoji": "🌲", "price": "55,000,000"},
-    "Elder Strawberry": {"emoji": "🍓", "price": "70,000,000"},
-    "Romanesco": {"emoji": "🥦", "price": "88,000,000"},
+    "Pepper": {"emoji": "🌶️", "price": "1M"},
+    "Cacao": {"emoji": "🍫", "price": "2.5M"},
+    "Beanstalk": {"emoji": "🪜", "price": "10M"},
+    "Ember Lily": {"emoji": "🔥", "price": "15M"},
+    "Sugar Apple": {"emoji": "🍎", "price": "25M"},
+    "Burning Bud": {"emoji": "🔥", "price": "40M"},
+    "Giant Pinecone": {"emoji": "🌲", "price": "55M"},
+    "Elder Strawberry": {"emoji": "🍓", "price": "70M"},
+    "Romanesco": {"emoji": "🥦", "price": "88M"},
     "Crimson Thorn": {"emoji": "🌹", "price": "10B"},
     "Broccoli": {"emoji": "🥦", "price": "600"},
     "Potato": {"emoji": "🥔", "price": "500"},
@@ -143,20 +139,9 @@ ITEMS_DATA.update(EVENT_DATA)
 last_stock_state: Dict[str, int] = {}
 last_autostock_notification: Dict[str, datetime] = {}
 user_autostocks_cache: Dict[int, Set[str]] = {}
-user_autostocks_time: Dict[int, datetime] = {}
-user_cooldowns: Dict[int, Dict[str, datetime]] = {}
 subscription_cache: Dict[int, tuple] = {}
-
-# Кеш для стока
 cached_stock_data: Optional[Dict] = None
 cached_stock_time: Optional[datetime] = None
-STOCK_CACHE_TTL = 30
-
-AUTOSTOCK_CACHE_TTL = 180
-MAX_CACHE_SIZE = 15000
-COMMAND_COOLDOWN = 3
-AUTOSTOCK_NOTIFICATION_COOLDOWN = 600
-SUBSCRIPTION_CACHE_TTL = 300
 
 NAME_TO_ID: Dict[str, str] = {}
 ID_TO_NAME: Dict[str, str] = {}
@@ -167,6 +152,7 @@ EGG_ITEMS_LIST = [(name, info) for name, info in ITEMS_DATA.items() if info['cat
 
 telegram_app: Optional[Application] = None
 discord_client: Optional[discord.Client] = None
+http_session: Optional[aiohttp.ClientSession] = None
 
 # ========== УТИЛИТЫ ==========
 def get_moscow_time() -> datetime:
@@ -178,7 +164,6 @@ def format_moscow_time() -> str:
 def get_next_check_time() -> datetime:
     now = get_moscow_time()
     current_minute = now.minute
-    
     next_minute = ((current_minute // CHECK_INTERVAL_MINUTES) + 1) * CHECK_INTERVAL_MINUTES
     
     if next_minute >= 60:
@@ -194,89 +179,38 @@ def get_next_check_time() -> datetime:
 def calculate_sleep_time() -> float:
     next_check = get_next_check_time()
     now = get_moscow_time()
-    sleep_seconds = (next_check - now).total_seconds()
-    return max(sleep_seconds, 0)
+    return max((next_check - now).total_seconds(), 0)
 
 def build_item_id_mappings():
     global NAME_TO_ID, ID_TO_NAME
-    NAME_TO_ID.clear()
-    ID_TO_NAME.clear()
-    
     for item_name in ITEMS_DATA.keys():
         hash_obj = hashlib.sha1(item_name.encode('utf-8'))
         hash_hex = hash_obj.hexdigest()[:8]
         category = ITEMS_DATA[item_name]['category']
         safe_id = f"t_{category}_{hash_hex}"
-        
         NAME_TO_ID[item_name] = safe_id
         ID_TO_NAME[safe_id] = item_name
-        
     logger.info(f"✅ Построены маппинги: {len(NAME_TO_ID)} предметов")
 
-def _cleanup_cache():
-    global user_autostocks_cache, user_autostocks_time, subscription_cache
-    
-    now = get_moscow_time()
-    
-    if len(user_autostocks_cache) > MAX_CACHE_SIZE:
-        to_delete = [uid for uid, ct in user_autostocks_time.items() 
-                     if (now - ct).total_seconds() > 600]
-        
-        for user_id in to_delete:
-            user_autostocks_cache.pop(user_id, None)
-            user_autostocks_time.pop(user_id, None)
-        
-        if to_delete:
-            logger.info(f"♻️ Очищено {len(to_delete)} автостоков")
-    
-    if len(subscription_cache) > 5000:
-        to_delete = [uid for uid, (_, ct) in list(subscription_cache.items()) 
-                     if (now - ct).total_seconds() > 600]
-        
-        for user_id in to_delete:
-            subscription_cache.pop(user_id, None)
-
-def check_command_cooldown(user_id: int, command: str) -> tuple:
-    if user_id not in user_cooldowns:
-        user_cooldowns[user_id] = {}
-    
-    if command in user_cooldowns[user_id]:
-        last_time = user_cooldowns[user_id][command]
-        now = get_moscow_time()
-        elapsed = (now - last_time).total_seconds()
-        
-        if elapsed < COMMAND_COOLDOWN:
-            seconds_left = int(COMMAND_COOLDOWN - elapsed)
-            return (False, seconds_left)
-    
-    user_cooldowns[user_id][command] = get_moscow_time()
-    return (True, None)
-
 async def check_subscription(bot: Bot, user_id: int) -> bool:
-    global subscription_cache
-    
     if user_id in subscription_cache:
         is_subscribed, cache_time = subscription_cache[user_id]
-        if (get_moscow_time() - cache_time).total_seconds() < SUBSCRIPTION_CACHE_TTL:
+        if (get_moscow_time() - cache_time).total_seconds() < 300:
             return is_subscribed
     
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
         is_subscribed = member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER]
-        
         subscription_cache[user_id] = (is_subscribed, get_moscow_time())
         return is_subscribed
-    except Exception as e:
-        logger.error(f"❌ Ошибка проверки подписки для {user_id}: {e}")
-        subscription_cache[user_id] = (True, get_moscow_time())
+    except:
         return True
 
 def get_subscription_keyboard() -> InlineKeyboardMarkup:
-    keyboard = [
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton("📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_USERNAME}")],
         [InlineKeyboardButton("✅ Я подписался", callback_data="check_sub")]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+    ])
 
 # ========== БАЗА ДАННЫХ ==========
 class SupabaseDB:
@@ -284,103 +218,117 @@ class SupabaseDB:
         self.headers = {
             "apikey": SUPABASE_API_KEY,
             "Authorization": f"Bearer {SUPABASE_API_KEY}",
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal"
+            "Content-Type": "application/json"
         }
     
+    async def get_session(self) -> aiohttp.ClientSession:
+        global http_session
+        if http_session is None or http_session.closed:
+            http_session = aiohttp.ClientSession()
+        return http_session
+    
     async def save_user(self, user_id: int, username: str = None, first_name: str = None):
+        """Сохранение пользователя в таблицу users"""
         try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                data = {
-                    "user_id": user_id,
-                    "username": username,
-                    "first_name": first_name,
-                    "last_seen": datetime.now(pytz.UTC).isoformat()
-                }
-                
-                async with session.post(
-                    USERS_URL, 
-                    json=data, 
-                    headers={**self.headers, "Prefer": "resolution=merge-duplicates"},
-                    timeout=5
-                ) as response:
-                    return response.status in [200, 201]
+            session = await self.get_session()
+            data = {
+                "user_id": user_id,
+                "username": username,
+                "first_name": first_name,
+                "last_seen": datetime.now(pytz.UTC).isoformat()
+            }
+            headers = {**self.headers, "Prefer": "resolution=merge-duplicates"}
+            
+            async with session.post(USERS_URL, json=data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                return response.status in [200, 201]
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения пользователя: {e}")
+            logger.error(f"❌ Ошибка сохранения пользователя {user_id}: {e}")
             return False
     
-    async def load_user_autostocks(self, user_id: int, use_cache: bool = True) -> Set[str]:
-        if use_cache and user_id in user_autostocks_cache:
-            cache_time = user_autostocks_time.get(user_id)
-            if cache_time:
-                now = get_moscow_time()
-                if (now - cache_time).total_seconds() < AUTOSTOCK_CACHE_TTL:
-                    return user_autostocks_cache[user_id].copy()
+    async def load_user_autostocks(self, user_id: int) -> Set[str]:
+        """Загрузка автостоков пользователя из таблицы user_autostocks"""
+        if user_id in user_autostocks_cache:
+            return user_autostocks_cache[user_id].copy()
         
         try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                params = {"user_id": f"eq.{user_id}", "select": "item_name"}
-                
-                async with session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=5) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        items_set = {item['item_name'] for item in data}
-                        
-                        user_autostocks_cache[user_id] = items_set
-                        user_autostocks_time[user_id] = get_moscow_time()
-                        
-                        logger.info(f"📥 Загружено {len(items_set)} автостоков для {user_id}")
-                        return items_set
+            session = await self.get_session()
+            params = {"user_id": f"eq.{user_id}", "select": "item_name"}
+            
+            async with session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    items_set = {item['item_name'] for item in data}
+                    user_autostocks_cache[user_id] = items_set
+                    logger.info(f"📥 Загружено {len(items_set)} автостоков для user_id={user_id}")
+                    return items_set
+                else:
+                    response_text = await response.text()
+                    logger.error(f"❌ Ошибка загрузки автостоков: status={response.status}, body={response_text}")
                     return set()
         except Exception as e:
-            logger.error(f"❌ Ошибка загрузки автостоков: {e}")
+            logger.error(f"❌ Ошибка загрузки автостоков для user_id={user_id}: {e}")
             return user_autostocks_cache.get(user_id, set()).copy()
     
     async def save_user_autostock(self, user_id: int, item_name: str) -> bool:
+        """Добавление автостока в таблицу user_autostocks (user_id, item_name)"""
         try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                data = {"user_id": user_id, "item_name": item_name}
+            session = await self.get_session()
+            data = {"user_id": user_id, "item_name": item_name}
+            headers = {**self.headers, "Prefer": "resolution=merge-duplicates"}
+            
+            async with session.post(AUTOSTOCKS_URL, json=data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                response_text = await response.text()
+                success = response.status in [200, 201]
                 
-                async with session.post(AUTOSTOCKS_URL, json=data, headers=self.headers, timeout=5) as response:
-                    success = response.status in [200, 201]
-                    if success:
-                        logger.info(f"💾 Сохранен автосток: {user_id} -> {item_name}")
-                    return success
+                if success:
+                    if user_id not in user_autostocks_cache:
+                        user_autostocks_cache[user_id] = set()
+                    user_autostocks_cache[user_id].add(item_name)
+                    logger.info(f"💾 Сохранен автосток: user_id={user_id}, item={item_name}")
+                else:
+                    logger.error(f"❌ Ошибка сохранения: status={response.status}, body={response_text}")
+                
+                return success
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения: {e}")
+            logger.error(f"❌ Ошибка сохранения автостока для user_id={user_id}, item={item_name}: {e}")
             return False
     
     async def remove_user_autostock(self, user_id: int, item_name: str) -> bool:
+        """Удаление автостока из таблицы user_autostocks по user_id и item_name"""
         try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                params = {"user_id": f"eq.{user_id}", "item_name": f"eq.{item_name}"}
+            session = await self.get_session()
+            params = {"user_id": f"eq.{user_id}", "item_name": f"eq.{item_name}"}
+            
+            async with session.delete(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                success = response.status in [200, 204]
                 
-                async with session.delete(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=5) as response:
-                    success = response.status in [200, 204]
-                    if success:
-                        logger.info(f"🗑️ Удален автосток: {user_id} -> {item_name}")
-                    return success
+                if success:
+                    if user_id in user_autostocks_cache:
+                        user_autostocks_cache[user_id].discard(item_name)
+                    logger.info(f"🗑️ Удален автосток: user_id={user_id}, item={item_name}")
+                else:
+                    response_text = await response.text()
+                    logger.error(f"❌ Ошибка удаления: status={response.status}, body={response_text}")
+                
+                return success
         except Exception as e:
-            logger.error(f"❌ Ошибка удаления: {e}")
+            logger.error(f"❌ Ошибка удаления автостока для user_id={user_id}, item={item_name}: {e}")
             return False
     
     async def get_users_tracking_item(self, item_name: str) -> List[int]:
+        """Получение всех user_id, которые отслеживают данный item_name"""
         try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                params = {"item_name": f"eq.{item_name}", "select": "user_id"}
-                
-                async with session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=5) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return [item['user_id'] for item in data]
-                    return []
+            session = await self.get_session()
+            params = {"item_name": f"eq.{item_name}", "select": "user_id"}
+            
+            async with session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    user_ids = [item['user_id'] for item in data]
+                    return user_ids
+                return []
         except Exception as e:
-            logger.error(f"❌ Ошибка получения пользователей: {e}")
+            logger.error(f"❌ Ошибка получения пользователей для item={item_name}: {e}")
             return []
 
 # ========== DISCORD ПАРСЕР ==========
@@ -390,59 +338,39 @@ class DiscordStockParser:
         self.telegram_bot: Optional[Bot] = None
     
     def parse_stock_message(self, content: str, channel_name: str) -> Dict:
-        """Парсинг с учетом типа канала"""
-        result = {
-            "seeds": [],
-            "gear": [],
-            "eggs": [],
-            "events": []
-        }
-        
+        result = {"seeds": [], "gear": [], "eggs": [], "events": []}
         lines = content.split('\n')
         
-        # Для event_content всё идёт в events
         if channel_name == "event_content":
             for line in lines:
                 line = line.strip()
                 if 'x' in line and not any(skip in line.lower() for skip in ['shop', 'stock', 'safari', 'updated', 'limited', 'today']):
                     clean_line = re.sub(r'[•\*\-]', '', line)
                     match = re.search(r'([A-Za-z\s\'\-]+?)\s+(\d+)x', clean_line)
-                    
                     if match:
                         item_name = match.group(1).strip()
                         quantity = int(match.group(2))
-                        
                         if quantity > 0 and item_name in EVENT_DATA:
                             result['events'].append((item_name, quantity))
             return result
         
-        # Для остальных каналов
         current_section = None
-        
         for line in lines:
             line = line.strip()
-            
-            if 'SEEDS STOCK' in line or 'Spooky Seeds' in line:
+            if 'SEEDS STOCK' in line:
                 current_section = 'seeds'
-                continue
-            elif 'GEAR STOCK' in line or 'Ghostly Gadgets' in line:
+            elif 'GEAR STOCK' in line:
                 current_section = 'gear'
-                continue
-            elif 'EGG STOCK' in line or 'Creepy Critters' in line:
+            elif 'EGG STOCK' in line:
                 current_section = 'eggs'
-                continue
-            elif 'COSMETICS STOCK' in line or 'Devilish Decor' in line:
+            elif 'COSMETICS' in line:
                 current_section = None
-                continue
-            
-            if current_section and 'x' in line:
+            elif current_section and 'x' in line:
                 clean_line = re.sub(r'[^\w\s\-]', '', line)
                 match = re.search(r'([A-Za-z\s\-]+)\s*x(\d+)', clean_line)
-                
                 if match:
                     item_name = match.group(1).strip()
                     quantity = int(match.group(2))
-                    
                     if quantity > 0:
                         result[current_section].append((item_name, quantity))
         
@@ -450,169 +378,88 @@ class DiscordStockParser:
     
     def format_stock_message(self, stock_data: Dict) -> str:
         if not stock_data:
-            return "❌ *Не удалось получить данные о стоке*\n\n_Discord клиент не готов или нет данных_"
+            return "❌ *Не удалось получить данные о стоке*"
         
         current_time = format_moscow_time()
         message = "📊 *ТЕКУЩИЙ СТОК*\n\n"
         
-        # Семена
-        seeds = stock_data.get('seeds', [])
-        if seeds:
-            message += "🌱 *СЕМЕНА:*\n"
-            for item_name, quantity in seeds:
-                item_info = SEEDS_DATA.get(item_name, {"emoji": "🌱", "price": "?"})
-                message += f"{item_info['emoji']} {item_name} x{quantity}\n"
-            message += "\n"
-        else:
-            message += "🌱 *СЕМЕНА:* _Пусто_\n\n"
+        for category, emoji, title in [
+            ('seeds', '🌱', 'СЕМЕНА'),
+            ('gear', '⚔️', 'ГИРЫ'),
+            ('eggs', '🥚', 'ЯЙЦА'),
+            ('events', '🌴', 'SAFARI SHOP')
+        ]:
+            items = stock_data.get(category, [])
+            if items:
+                message += f"{emoji} *{title}:*\n"
+                for item_name, quantity in items:
+                    if category == 'seeds':
+                        item_info = SEEDS_DATA.get(item_name, {"emoji": emoji, "price": "?"})
+                    elif category == 'gear':
+                        item_info = GEAR_DATA.get(item_name, {"emoji": "⚔️", "price": "?"})
+                    elif category == 'eggs':
+                        item_info = EGGS_DATA.get(item_name, {"emoji": "🥚", "price": "?"})
+                    else:
+                        item_info = EVENT_DATA.get(item_name, {"emoji": "📦", "price": "?"})
+                    message += f"{item_info['emoji']} {item_name} x{quantity}\n"
+                message += "\n"
+            else:
+                message += f"{emoji} *{title}:* _Пусто_\n\n"
         
-        # Гиры
-        gear = stock_data.get('gear', [])
-        if gear:
-            message += "⚔️ *ГИРЫ:*\n"
-            for item_name, quantity in gear:
-                item_info = GEAR_DATA.get(item_name, {"emoji": "⚔️", "price": "?"})
-                message += f"{item_info['emoji']} {item_name} x{quantity}\n"
-            message += "\n"
-        else:
-            message += "⚔️ *ГИРЫ:* _Пусто_\n\n"
-        
-        # Яйца
-        eggs = stock_data.get('eggs', [])
-        if eggs:
-            message += "🥚 *ЯЙЦА:*\n"
-            for item_name, quantity in eggs:
-                item_info = EGGS_DATA.get(item_name, {"emoji": "🥚", "price": "?"})
-                message += f"{item_info['emoji']} {item_name} x{quantity}\n"
-            message += "\n"
-        else:
-            message += "🥚 *ЯЙЦА:* _Пусто_\n\n"
-        
-        # Ивент
-        events = stock_data.get('events', [])
-        if events:
-            message += "🌴 *SAFARI SHOP (ИВЕНТ):*\n"
-            for item_name, quantity in events:
-                item_info = EVENT_DATA.get(item_name, {"emoji": "📦", "price": "?"})
-                message += f"{item_info['emoji']} {item_name} x{quantity}\n"
-        else:
-            message += "🌴 *SAFARI SHOP:* _Пусто_"
-        
-        message += f"\n\n🕒 {current_time} МСК"
+        message += f"🕒 {current_time} МСК"
         return message
-    
-    async def send_notification(self, bot: Bot, channel_id: str, item_name: str, count: int):
-        try:
-            item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "Unknown"})
-            current_time = format_moscow_time()
-
-            message = (
-                f"🚨 *РЕДКИЙ ПРЕДМЕТ В СТОКЕ* 🚨\n\n"
-                f"{item_info['emoji']} *{item_name}*\n"
-                f"📦 Количество: *x{count}*\n"
-                f"💰 Цена: {item_info['price']} ¢\n\n"
-                f"🕒 {current_time} МСК"
-            )
-
-            await bot.send_message(chat_id=channel_id, text=message, parse_mode=ParseMode.MARKDOWN)
-            logger.info(f"✅ Уведомление: {item_name} x{count}")
-        except Exception as e:
-            logger.error(f"❌ Ошибка отправки: {e}")
     
     async def send_autostock_notification(self, bot: Bot, user_id: int, item_name: str, count: int):
         try:
-            item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "Unknown"})
-            current_time = format_moscow_time()
-
+            item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "?"})
             message = (
-                f"🔔 *АВТОСТОК - {item_name}*\n\n"
+                f"🔔 *АВТОСТОК*\n\n"
                 f"{item_info['emoji']} *{item_name}*\n"
-                f"📦 Количество: *x{count}*\n"
+                f"📦 Количество: x{count}\n"
                 f"💰 Цена: {item_info['price']} ¢\n\n"
-                f"🕒 {current_time} МСК"
+                f"🕒 {format_moscow_time()} МСК"
             )
-
             await bot.send_message(chat_id=user_id, text=message, parse_mode=ParseMode.MARKDOWN)
         except:
             pass
     
-    def can_send_autostock_notification(self, item_name: str) -> bool:
-        global last_autostock_notification
-        
-        if item_name not in last_autostock_notification:
-            return True
-        
-        now = get_moscow_time()
-        last_time = last_autostock_notification[item_name]
-        return (now - last_time).total_seconds() >= AUTOSTOCK_NOTIFICATION_COOLDOWN
-    
     async def check_user_autostocks(self, stock_data: Dict, bot: Bot):
         global last_autostock_notification
-        
         if not stock_data:
             return
 
         current_stock = {}
-        
-        for stock_type in ['seeds', 'gear', 'eggs', 'events']:
-            items = stock_data.get(stock_type, [])
-            for item_name, quantity in items:
+        for stock_type in ['seeds', 'gear', 'eggs']:
+            for item_name, quantity in stock_data.get(stock_type, []):
                 if quantity > 0:
                     current_stock[item_name] = quantity
 
-        items_to_check = [item_name for item_name, count in current_stock.items() 
-                         if count > 0 and self.can_send_autostock_notification(item_name)]
+        items_to_check = []
+        for item_name, count in current_stock.items():
+            if item_name not in last_autostock_notification:
+                items_to_check.append(item_name)
+            else:
+                last_time = last_autostock_notification[item_name]
+                if (get_moscow_time() - last_time).total_seconds() >= 600:
+                    items_to_check.append(item_name)
         
         if not items_to_check:
             return
         
-        item_users_map = {}
         tasks = [self.db.get_users_tracking_item(item_name) for item_name in items_to_check]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
+        send_tasks = []
         for item_name, result in zip(items_to_check, results):
             if not isinstance(result, Exception) and result:
-                item_users_map[item_name] = result
-        
-        send_tasks = []
-        for item_name, count in current_stock.items():
-            if item_name in item_users_map:
-                users = item_users_map[item_name]
-                for user_id in users:
+                count = current_stock[item_name]
+                for user_id in result:
                     send_tasks.append(self.send_autostock_notification(bot, user_id, item_name, count))
-                    
-                    if len(send_tasks) >= 50:
-                        await asyncio.gather(*send_tasks, return_exceptions=True)
-                        send_tasks = []
-                        await asyncio.sleep(0.03)
+                last_autostock_notification[item_name] = get_moscow_time()
         
         if send_tasks:
             await asyncio.gather(*send_tasks, return_exceptions=True)
-        
-        for item_name in items_to_check:
-            last_autostock_notification[item_name] = get_moscow_time()
-        
-        total_sent = sum(len(item_users_map.get(item, [])) for item in current_stock.keys())
-        if total_sent > 0:
-            logger.info(f"📤 Отправлено {total_sent} автосток уведомлений")
-
-    async def check_for_notifications(self, stock_data: Dict, bot: Bot, channel_id: str):
-        global last_stock_state
-        if not stock_data or not channel_id:
-            return
-
-        current_stock = {}
-        for item_name, quantity in stock_data.get('seeds', []):
-            current_stock[item_name] = quantity
-
-        for item_name in RAREST_SEEDS:
-            current_count = current_stock.get(item_name, 0)
-            previous_count = last_stock_state.get(item_name, 0)
-            
-            if current_count > 0 and previous_count == 0:
-                await self.send_notification(bot, channel_id, item_name, current_count)
-
-        last_stock_state = current_stock.copy()
+            logger.info(f"📤 Отправлено {len(send_tasks)} уведомлений")
 
 parser = DiscordStockParser()
 
@@ -620,90 +467,57 @@ parser = DiscordStockParser()
 class StockDiscordClient(discord.Client):
     def __init__(self):
         super().__init__()
-        self.stock_data_cache = None
         self.stock_lock = asyncio.Lock()
     
     async def on_ready(self):
-        logger.info(f'✅ Discord: Залогинен как {self.user}')
-        
+        logger.info(f'✅ Discord: {self.user}')
         for channel_name, channel_id in DISCORD_CHANNELS.items():
             channel = self.get_channel(channel_id)
             if channel:
-                logger.info(f"✅ Канал {channel_name}: {channel.name}")
-            else:
-                logger.error(f"❌ Канал {channel_name} недоступен")
+                logger.info(f"✅ {channel_name}: {channel.name}")
     
     async def fetch_stock_data(self) -> Dict:
-        """Быстрое получение стока с кешем"""
         global cached_stock_data, cached_stock_time
         
         now = get_moscow_time()
-        
         if cached_stock_data and cached_stock_time:
-            if (now - cached_stock_time).total_seconds() < STOCK_CACHE_TTL:
+            if (now - cached_stock_time).total_seconds() < 30:
                 return cached_stock_data
         
         async with self.stock_lock:
-            if cached_stock_data and cached_stock_time:
-                if (now - cached_stock_time).total_seconds() < STOCK_CACHE_TTL:
-                    return cached_stock_data
+            stock_data = {"seeds": [], "gear": [], "eggs": [], "events": []}
             
-            try:
-                stock_data = {
-                    "seeds": [],
-                    "gear": [],
-                    "eggs": [],
-                    "events": []
-                }
-                
-                for channel_name, channel_id in DISCORD_CHANNELS.items():
-                    try:
-                        channel = self.get_channel(channel_id)
-                        if not channel:
-                            continue
-                        
-                        messages = []
-                        async for msg in channel.history(limit=2):
-                            messages.append(msg)
-                            if len(messages) >= 2:
-                                break
-                        
-                        for msg in messages:
-                            if msg.author.bot and ('Vulcan' in msg.author.name or 'Dawn' in msg.author.name):
-                                content_to_parse = ""
-                                
-                                if msg.embeds:
-                                    for embed in msg.embeds:
-                                        if embed.description:
-                                            content_to_parse += embed.description + "\n"
-                                        for field in embed.fields:
-                                            content_to_parse += f"{field.name}\n{field.value}\n"
-                                
-                                if msg.content:
-                                    content_to_parse += msg.content
-                                
-                                if content_to_parse:
-                                    parsed = parser.parse_stock_message(content_to_parse, channel_name)
-                                    
-                                    for category in parsed:
-                                        stock_data[category].extend(parsed[category])
-                                    
-                                    break
-                    
-                    except Exception as e:
-                        logger.error(f"❌ Ошибка парсинга {channel_name}: {e}")
+            for channel_name, channel_id in DISCORD_CHANNELS.items():
+                try:
+                    channel = self.get_channel(channel_id)
+                    if not channel:
                         continue
-                
-                cached_stock_data = stock_data
-                cached_stock_time = get_moscow_time()
-                
-                return stock_data
-                
-            except Exception as e:
-                logger.error(f"❌ Ошибка fetch_stock_data: {e}")
-                return cached_stock_data or {"seeds": [], "gear": [], "eggs": [], "events": []}
+                    
+                    async for msg in channel.history(limit=2):
+                        if msg.author.bot and ('Vulcan' in msg.author.name or 'Dawn' in msg.author.name):
+                            content = ""
+                            if msg.embeds:
+                                for embed in msg.embeds:
+                                    if embed.description:
+                                        content += embed.description + "\n"
+                                    for field in embed.fields:
+                                        content += f"{field.name}\n{field.value}\n"
+                            if msg.content:
+                                content += msg.content
+                            
+                            if content:
+                                parsed = parser.parse_stock_message(content, channel_name)
+                                for category in parsed:
+                                    stock_data[category].extend(parsed[category])
+                                break
+                except Exception as e:
+                    logger.error(f"❌ Ошибка {channel_name}: {e}")
+            
+            cached_stock_data = stock_data
+            cached_stock_time = get_moscow_time()
+            return stock_data
 
-# ========== КОМАНДЫ TELEGRAM БОТА ==========
+# ========== КОМАНДЫ ==========
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_user:
         return
@@ -712,55 +526,35 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asyncio.create_task(parser.db.save_user(user.id, user.username, user.first_name))
     
     is_subscribed = await check_subscription(context.bot, user.id)
-    
     if not is_subscribed:
-        message = (
-            "👋 *Добро пожаловать в GAG Stock Tracker!*\n\n"
-            "🔒 Для использования бота необходимо подписаться на наш канал:\n\n"
-            f"📢 @{CHANNEL_USERNAME}"
-        )
         await update.effective_message.reply_text(
-            message, 
+            f"👋 *Добро пожаловать!*\n\n🔒 Подпишитесь на @{CHANNEL_USERNAME}",
             reply_markup=get_subscription_keyboard(),
             parse_mode=ParseMode.MARKDOWN
         )
         return
     
-    welcome_message = (
-        "👋 *GAG Stock Tracker!*\n\n"
+    await update.effective_message.reply_text(
+        "👋 *GAG Stock Tracker*\n\n"
         "📊 /stock - Текущий сток\n"
         "🔔 /autostock - Автостоки\n"
-        "❓ /help - Справка\n\n"
-        f"📢 Канал: @{CHANNEL_USERNAME}"
+        "❓ /help - Справка",
+        parse_mode=ParseMode.MARKDOWN
     )
-    await update.effective_message.reply_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
 
 async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_user:
         return
     
-    user_id = update.effective_user.id
-    
-    is_subscribed = await check_subscription(context.bot, user_id)
-    if not is_subscribed:
+    if not await check_subscription(context.bot, update.effective_user.id):
         await update.effective_message.reply_text(
-            "🔒 Для использования бота подпишитесь на канал:",
+            "🔒 Подпишитесь на канал",
             reply_markup=get_subscription_keyboard()
         )
         return
     
-    can_execute, seconds_left = check_command_cooldown(user_id, 'stock')
-    if not can_execute:
-        await update.effective_message.reply_text(
-            f"⏳ Подождите {seconds_left} сек. перед следующим запросом"
-        )
-        return
-    
     if not discord_client or not discord_client.is_ready():
-        await update.effective_message.reply_text(
-            "⚠️ *Discord клиент загружается*\n\nПожалуйста, подождите и попробуйте снова.",
-            parse_mode=ParseMode.MARKDOWN
-        )
+        await update.effective_message.reply_text("⚠️ *Discord загружается...*", parse_mode=ParseMode.MARKDOWN)
         return
     
     stock_data = await discord_client.fetch_stock_data()
@@ -771,20 +565,10 @@ async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_user:
         return
     
-    user_id = update.effective_user.id
-    
-    is_subscribed = await check_subscription(context.bot, user_id)
-    if not is_subscribed:
+    if not await check_subscription(context.bot, update.effective_user.id):
         await update.effective_message.reply_text(
-            "🔒 Для использования бота подпишитесь на канал:",
+            "🔒 Подпишитесь на канал",
             reply_markup=get_subscription_keyboard()
-        )
-        return
-    
-    can_execute, seconds_left = check_command_cooldown(user_id, 'autostock')
-    if not can_execute:
-        await update.effective_message.reply_text(
-            f"⏳ Подождите {seconds_left} сек. перед следующим запросом"
         )
         return
     
@@ -794,19 +578,15 @@ async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🥚 Яйца", callback_data="as_eggs")],
         [InlineKeyboardButton("📋 Мои автостоки", callback_data="as_list")],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    message = (
-        "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\n"
-        "Выберите категорию предметов.\n"
-        "⏰ Проверка: каждые 5 минут"
+    await update.effective_message.reply_text(
+        "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\nВыберите категорию.\n⏰ Проверка: каждые 5 минут",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.MARKDOWN
     )
-    
-    await update.effective_message.reply_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
 async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    
     if not update.effective_user:
         await query.answer()
         return
@@ -816,90 +596,56 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     if data == "check_sub":
         subscription_cache.pop(user_id, None)
-        
-        is_subscribed = await check_subscription(context.bot, user_id)
-        if is_subscribed:
-            welcome_message = (
-                "✅ *Подписка подтверждена!*\n\n"
-                "📊 /stock - Текущий сток\n"
-                "🔔 /autostock - Автостоки\n"
-                "❓ /help - Справка\n\n"
-                f"📢 Канал: @{CHANNEL_USERNAME}"
+        if await check_subscription(context.bot, user_id):
+            await query.edit_message_text(
+                "✅ *Подписка подтверждена!*\n\n📊 /stock\n🔔 /autostock\n❓ /help",
+                parse_mode=ParseMode.MARKDOWN
             )
-            await query.edit_message_text(welcome_message, parse_mode=ParseMode.MARKDOWN)
         else:
-            await query.answer("❌ Вы еще не подписались на канал", show_alert=True)
+            await query.answer("❌ Вы не подписались", show_alert=True)
         return
     
-    is_subscribed = await check_subscription(context.bot, user_id)
-    if not is_subscribed:
-        await query.answer("🔒 Сначала подпишитесь на канал", show_alert=True)
+    if not await check_subscription(context.bot, user_id):
+        await query.answer("🔒 Подпишитесь на канал", show_alert=True)
         return
     
     try:
-        if data == "as_seeds":
-            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
+        if data in ["as_seeds", "as_gear", "as_eggs"]:
+            user_items = await parser.db.load_user_autostocks(user_id)
+            
+            if data == "as_seeds":
+                items_list, header = SEED_ITEMS_LIST, "🌱 *СЕМЕНА*\n\nВыберите предметы:"
+            elif data == "as_gear":
+                items_list, header = GEAR_ITEMS_LIST, "⚔️ *ГИРЫ*\n\nВыберите предметы:"
+            else:
+                items_list, header = EGG_ITEMS_LIST, "🥚 *ЯЙЦА*\n\nВыберите предметы:"
+            
             keyboard = []
-            for item_name, item_info in SEED_ITEMS_LIST:
-                is_tracking = item_name in user_items
-                status = "✅" if is_tracking else "➕"
-                safe_callback = NAME_TO_ID.get(item_name, "invalid")
+            for item_name, item_info in items_list:
+                status = "✅" if item_name in user_items else "➕"
                 keyboard.append([InlineKeyboardButton(
                     f"{status} {item_info['emoji']} {item_name}",
-                    callback_data=safe_callback
+                    callback_data=NAME_TO_ID.get(item_name, "invalid")
                 )])
             keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
+            
             await query.answer()
-            await query.edit_message_text("🌱 *СЕМЕНА*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-        
-        elif data == "as_gear":
-            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
-            keyboard = []
-            for item_name, item_info in GEAR_ITEMS_LIST:
-                is_tracking = item_name in user_items
-                status = "✅" if is_tracking else "➕"
-                safe_callback = NAME_TO_ID.get(item_name, "invalid")
-                keyboard.append([InlineKeyboardButton(
-                    f"{status} {item_info['emoji']} {item_name}",
-                    callback_data=safe_callback
-                )])
-            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.answer()
-            await query.edit_message_text("⚔️ *ГИРЫ*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-        
-        elif data == "as_eggs":
-            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
-            keyboard = []
-            for item_name, item_info in EGG_ITEMS_LIST:
-                is_tracking = item_name in user_items
-                status = "✅" if is_tracking else "➕"
-                safe_callback = NAME_TO_ID.get(item_name, "invalid")
-                keyboard.append([InlineKeyboardButton(
-                    f"{status} {item_info['emoji']} {item_name}",
-                    callback_data=safe_callback
-                )])
-            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.answer()
-            await query.edit_message_text("🥚 *ЯЙЦА*\n\nВыберите предметы:", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+            await query.edit_message_text(header, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
         
         elif data == "as_list":
-            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
+            user_items = await parser.db.load_user_autostocks(user_id)
             if not user_items:
                 message = "📋 *МОИ АВТОСТОКИ*\n\n_Нет отслеживаемых предметов_"
             else:
                 items_list = []
                 for item_name in sorted(user_items):
-                    item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "Unknown"})
+                    item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "?"})
                     items_list.append(f"{item_info['emoji']} {item_name} ({item_info['price']} ¢)")
                 message = f"📋 *МОИ АВТОСТОКИ*\n\n" + "\n".join(items_list)
             
             keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="as_back")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
             await query.answer()
-            await query.edit_message_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+            await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
         
         elif data == "as_back":
             keyboard = [
@@ -908,10 +654,12 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 [InlineKeyboardButton("🥚 Яйца", callback_data="as_eggs")],
                 [InlineKeyboardButton("📋 Мои автостоки", callback_data="as_list")],
             ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            message = "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\nВыберите категорию."
             await query.answer()
-            await query.edit_message_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+            await query.edit_message_text(
+                "🔔 *УПРАВЛЕНИЕ АВТОСТОКАМИ*\n\nВыберите категорию.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.MARKDOWN
+            )
         
         elif data.startswith("t_"):
             item_name = ID_TO_NAME.get(data)
@@ -921,15 +669,15 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             
             category = ITEMS_DATA.get(item_name, {}).get('category', 'seed')
             
-            # Загружаем текущее состояние
-            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
-            is_currently_tracked = item_name in user_items
+            # Сбрасываем кеш и загружаем актуальные данные
+            user_autostocks_cache.pop(user_id, None)
+            user_items = await parser.db.load_user_autostocks(user_id)
+            is_tracked = item_name in user_items
             
             # Выполняем операцию
-            if is_currently_tracked:
+            if is_tracked:
                 success = await parser.db.remove_user_autostock(user_id, item_name)
                 if success:
-                    user_autostocks_cache.pop(user_id, None)  # Сбрасываем кеш
                     await query.answer(f"❌ {item_name} удален")
                 else:
                     await query.answer("⚠️ Ошибка удаления", show_alert=True)
@@ -937,14 +685,14 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             else:
                 success = await parser.db.save_user_autostock(user_id, item_name)
                 if success:
-                    user_autostocks_cache.pop(user_id, None)  # Сбрасываем кеш
                     await query.answer(f"✅ {item_name} добавлен")
                 else:
                     await query.answer("⚠️ Ошибка сохранения", show_alert=True)
                     return
             
-            # Загружаем обновленное состояние
-            user_items = await parser.db.load_user_autostocks(user_id, use_cache=False)
+            # Загружаем обновленные данные
+            user_autostocks_cache.pop(user_id, None)
+            user_items = await parser.db.load_user_autostocks(user_id)
             
             # Определяем список
             if category == 'seed':
@@ -957,51 +705,44 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             # Строим клавиатуру
             keyboard = []
             for name, info in items_list:
-                is_tracking = name in user_items
-                status = "✅" if is_tracking else "➕"
-                safe_callback = NAME_TO_ID.get(name, "invalid")
+                status = "✅" if name in user_items else "➕"
                 keyboard.append([InlineKeyboardButton(
                     f"{status} {info['emoji']} {name}",
-                    callback_data=safe_callback
+                    callback_data=NAME_TO_ID.get(name, "invalid")
                 )])
             keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="as_back")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
             
             # Обновляем клавиатуру
             try:
-                await query.edit_message_reply_markup(reply_markup=reply_markup)
-                logger.info(f"✅ Клавиатура обновлена: {user_id} -> {item_name} (tracked: {item_name in user_items})")
+                await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+                logger.info(f"✅ Обновлено: {user_id} -> {item_name} (tracked: {item_name in user_items})")
             except TelegramError as e:
-                logger.error(f"❌ Ошибка обновления клавиатуры: {e}")
+                logger.error(f"❌ Ошибка обновления UI: {e}")
     
     except Exception as e:
-        logger.error(f"❌ Ошибка в autostock_callback: {e}")
+        logger.error(f"❌ Ошибка в callback: {e}")
         await query.answer("⚠️ Произошла ошибка", show_alert=True)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_user:
         return
     
-    user_id = update.effective_user.id
-    
-    is_subscribed = await check_subscription(context.bot, user_id)
-    if not is_subscribed:
+    if not await check_subscription(context.bot, update.effective_user.id):
         await update.effective_message.reply_text(
-            "🔒 Для использования бота подпишитесь на канал:",
+            "🔒 Подпишитесь на канал",
             reply_markup=get_subscription_keyboard()
         )
         return
     
-    help_message = (
+    await update.effective_message.reply_text(
         "📚 *КОМАНДЫ:*\n\n"
         "/start - Информация\n"
         "/stock - Текущий сток\n"
         "/autostock - Настроить автостоки\n"
         "/help - Справка\n\n"
-        "⏰ Проверка каждые 5 минут\n"
-        f"📢 Канал: @{CHANNEL_USERNAME}"
+        "⏰ Проверка каждые 5 минут",
+        parse_mode=ParseMode.MARKDOWN
     )
-    await update.effective_message.reply_text(help_message, parse_mode=ParseMode.MARKDOWN)
 
 # ========== ПЕРИОДИЧЕСКАЯ ПРОВЕРКА ==========
 async def periodic_stock_check(application: Application):
@@ -1014,31 +755,20 @@ async def periodic_stock_check(application: Application):
     
     try:
         initial_sleep = calculate_sleep_time()
-        logger.info(f"⏰ Ожидание до первой проверки: {int(initial_sleep)}с")
+        logger.info(f"⏰ Первая проверка через {int(initial_sleep)}с")
         await asyncio.sleep(initial_sleep)
 
         check_count = 0
         while True:
             try:
-                now = get_moscow_time()
                 check_count += 1
-                logger.info(f"🔍 Проверка #{check_count} - {now.strftime('%H:%M:%S')}")
-                
-                if check_count % 12 == 0:
-                    _cleanup_cache()
+                logger.info(f"🔍 Проверка #{check_count}")
                 
                 stock_data = await discord_client.fetch_stock_data()
-                
                 if stock_data:
-                    tasks = []
-                    if CHANNEL_ID:
-                        tasks.append(parser.check_for_notifications(stock_data, application.bot, CHANNEL_ID))
-                    tasks.append(parser.check_user_autostocks(stock_data, application.bot))
-                    
-                    await asyncio.gather(*tasks, return_exceptions=True)
+                    await parser.check_user_autostocks(stock_data, application.bot)
                 
                 sleep_time = calculate_sleep_time()
-                logger.info(f"💤 Следующая проверка через {int(sleep_time)}с")
                 await asyncio.sleep(sleep_time)
             except asyncio.CancelledError:
                 break
@@ -1048,7 +778,7 @@ async def periodic_stock_check(application: Application):
     except asyncio.CancelledError:
         pass
     finally:
-        logger.info("🛑 Периодическая проверка остановлена")
+        logger.info("🛑 Проверка остановлена")
 
 async def post_init(application: Application):
     asyncio.create_task(periodic_stock_check(application))
@@ -1056,7 +786,7 @@ async def post_init(application: Application):
 # ========== MAIN ==========
 def main():
     logger.info("="*60)
-    logger.info("🌱 GAG Stock Tracker Bot v2.0 FINAL")
+    logger.info("🌱 GAG Stock Tracker Bot v3.0 FINAL")
     logger.info("="*60)
 
     build_item_id_mappings()
@@ -1071,7 +801,6 @@ def main():
     telegram_app.add_handler(CommandHandler("stock", stock_command))
     telegram_app.add_handler(CommandHandler("autostock", autostock_command))
     telegram_app.add_handler(CommandHandler("help", help_command))
-    
     telegram_app.add_handler(CallbackQueryHandler(autostock_callback))
 
     telegram_app.post_init = post_init
@@ -1080,6 +809,8 @@ def main():
         logger.info("🛑 Остановка бота")
         if discord_client:
             await discord_client.close()
+        if http_session and not http_session.closed:
+            await http_session.close()
 
     telegram_app.post_shutdown = shutdown_callback
 
@@ -1110,7 +841,7 @@ def main():
     try:
         asyncio.run(run_both())
     except KeyboardInterrupt:
-        logger.info("⚠️ Получен сигнал остановки")
+        logger.info("⚠️ Остановка...")
 
 if __name__ == "__main__":
     main()
