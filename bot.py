@@ -761,6 +761,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/stock - Текущий сток\n"
         "/autostock - Настройка автостоков\n"
         "/test - Тестовая проверка\n"
+        "/checknow - Проверить сейчас\n"
         "/help - Помощь\n\n"
         "⏰ Проверка: каждые 5 минут и 10 секунд\n"
         f"🌹 Редкие: {', '.join(RAREST_SEEDS)}",
@@ -793,14 +794,54 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.effective_message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
+async def check_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message or not update.effective_user:
+        return
+    
+    if not await check_subscription(context.bot, update.effective_user.id):
+        await update.effective_message.reply_text("🔒 Подпишитесь на канал", reply_markup=get_subscription_keyboard())
+        return
+    
+    if not discord_client or not discord_client.is_ready():
+        await update.effective_message.reply_text("⚠️ *Discord не готов*", parse_mode=ParseMode.MARKDOWN)
+        return
+    
+    await update.effective_message.reply_text("🔄 *Запускаю проверку...*", parse_mode=ParseMode.MARKDOWN)
+    
+    try:
+        stock_data = await discord_client.fetch_stock_data()
+        if stock_data:
+            await parser.check_user_autostocks(stock_data, context.bot)
+            
+            total = len(stock_data['seeds']) + len(stock_data['gear']) + len(stock_data['eggs'])
+            msg = f"✅ *Проверка завершена*\n\n📦 Найдено: {total} предметов\n"
+            msg += f"🌱 Семена: {len(stock_data['seeds'])}\n"
+            msg += f"⚔️ Гиры: {len(stock_data['gear'])}\n"
+            msg += f"🥚 Яйца: {len(stock_data['eggs'])}\n"
+            
+            await update.effective_message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        else:
+            await update.effective_message.reply_text("❌ *Не удалось получить данные*", parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"❌ Ошибка ручной проверки: {e}")
+        await update.effective_message.reply_text(f"❌ *Ошибка:* `{str(e)}`", parse_mode=ParseMode.MARKDOWN)
+
 # ========== ПЕРИОДИЧЕСКАЯ ПРОВЕРКА ==========
 async def periodic_stock_check(application: Application):
     logger.info("🚀 Периодическая проверка запущена")
     
-    while not discord_client or not discord_client.is_ready():
+    # Ждем пока Discord подключится
+    wait_time = 0
+    while (not discord_client or not discord_client.is_ready()) and wait_time < 60:
         await asyncio.sleep(1)
+        wait_time += 1
+    
+    if not discord_client or not discord_client.is_ready():
+        logger.error("❌ Discord не готов, периодическая проверка не запустится")
+        return
     
     parser.telegram_bot = application.bot
+    logger.info("✅ Периодическая проверка готова к работе")
     
     try:
         initial_sleep = calculate_sleep_time()
@@ -828,7 +869,7 @@ async def periodic_stock_check(application: Application):
                 logger.info("⚠️ Периодическая проверка отменена")
                 break
             except Exception as e:
-                logger.error(f"❌ Ошибка проверки: {e}")
+                logger.error(f"❌ Ошибка проверки: {e}", exc_info=True)
                 await asyncio.sleep(60)
     except asyncio.CancelledError:
         logger.info("⚠️ Периодическая проверка остановлена")
@@ -853,6 +894,8 @@ def main():
     telegram_app.add_handler(CommandHandler("start", start_command))
     telegram_app.add_handler(CommandHandler("stock", stock_command))
     telegram_app.add_handler(CommandHandler("autostock", autostock_command))
+    telegram_app.add_handler(CommandHandler("test", test_command))
+    telegram_app.add_handler(CommandHandler("checknow", check_now_command))
     telegram_app.add_handler(CommandHandler("help", help_command))
     telegram_app.add_handler(CallbackQueryHandler(autostock_callback))
 
@@ -884,7 +927,14 @@ def main():
         
         await telegram_app.initialize()
         await telegram_app.start()
-        await telegram_app.updater.start_polling(allowed_updates=None, drop_pending_updates=True)
+        
+        # Важно: drop_pending_updates=True убирает конфликты
+        await telegram_app.updater.start_polling(
+            allowed_updates=None, 
+            drop_pending_updates=True,
+            poll_interval=1.0,
+            timeout=30
+        )
         
         logger.info("🚀 Telegram бот запущен!")
         logger.info("="*60)
