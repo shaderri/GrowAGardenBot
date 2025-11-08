@@ -398,13 +398,21 @@ class DiscordStockParser:
     
     async def send_autostock_notification(self, bot: Bot, user_id: int, item_name: str, count: int):
         try:
-            item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "?"})
+            item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "?", "category": "item"})
+            category_emoji = {
+                "seed": "🌱",
+                "gear": "⚔️",
+                "egg": "🥚",
+                "event": "🌴"
+            }.get(item_info.get('category', 'item'), "📦")
+            
             message = (
-                f"🔔 *АВТОСТОК*\n\n"
+                f"🔔 *АВТОСТОК ОБНОВЛЕН*\n\n"
                 f"{item_info['emoji']} *{item_name}*\n"
-                f"📦 x{count}\n"
-                f"💰 {item_info['price']} ¢\n\n"
-                f"🕒 {format_moscow_time()}"
+                f"{category_emoji} Категория: {item_info.get('category', 'предмет').title()}\n"
+                f"📦 Количество: *{count} шт*\n"
+                f"💰 Цена: *{item_info['price']}* ¢\n\n"
+                f"⏰ {format_moscow_time()} МСК"
             )
             await bot.send_message(chat_id=user_id, text=message, parse_mode=ParseMode.MARKDOWN)
             logger.info(f"📤 Уведомление: {user_id} -> {item_name}")
@@ -417,9 +425,10 @@ class DiscordStockParser:
             message = (
                 f"🚨 *РЕДКИЙ СТОК!* 🚨\n\n"
                 f"{item_info['emoji']} *{item_name}*\n"
-                f"📦 x{count}\n"
-                f"💰 {item_info['price']} ¢\n\n"
-                f"🕒 {format_moscow_time()}"
+                f"📦 В наличии: *{count} шт*\n"
+                f"💰 Цена: *{item_info['price']}* ¢\n\n"
+                f"⚡️ Успей купить!\n"
+                f"⏰ {format_moscow_time()} МСК"
             )
             await bot.send_message(chat_id=CHANNEL_ID, text=message, parse_mode=ParseMode.MARKDOWN)
             logger.info(f"🚨 Редкое уведомление в канал: {item_name} x{count}")
@@ -826,6 +835,40 @@ async def check_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"❌ Ошибка ручной проверки: {e}")
         await update.effective_message.reply_text(f"❌ *Ошибка:* `{str(e)}`", parse_mode=ParseMode.MARKDOWN)
 
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message or not update.effective_user:
+        return
+    
+    if not await check_subscription(context.bot, update.effective_user.id):
+        await update.effective_message.reply_text("🔒 Подпишитесь на канал", reply_markup=get_subscription_keyboard())
+        return
+    
+    discord_status = "✅ Подключен" if discord_client and discord_client.is_ready() else "❌ Не подключен"
+    
+    # Проверяем наличие задачи периодической проверки
+    check_task_status = "❓ Неизвестно"
+    if 'check_task' in context.application.bot_data:
+        task = context.application.bot_data['check_task']
+        if task.done():
+            check_task_status = "❌ Остановлена"
+        else:
+            check_task_status = "✅ Работает"
+    else:
+        check_task_status = "❌ Не создана"
+    
+    next_check = get_next_check_time()
+    
+    msg = (
+        f"📊 *СТАТУС БОТА*\n\n"
+        f"🤖 Discord: {discord_status}\n"
+        f"🔄 Периодическая проверка: {check_task_status}\n"
+        f"⏰ Следующая проверка: {next_check.strftime('%H:%M:%S')}\n"
+        f"📋 Пользователей в кеше: {len(user_autostocks_cache)}\n\n"
+        f"🕒 {format_moscow_time()} МСК"
+    )
+    
+    await update.effective_message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
 # ========== ПЕРИОДИЧЕСКАЯ ПРОВЕРКА ==========
 async def periodic_stock_check(application: Application):
     logger.info("🚀 Периодическая проверка запущена")
@@ -835,6 +878,8 @@ async def periodic_stock_check(application: Application):
     while (not discord_client or not discord_client.is_ready()) and wait_time < 60:
         await asyncio.sleep(1)
         wait_time += 1
+        if wait_time % 10 == 0:
+            logger.info(f"⏳ Ожидание Discord... ({wait_time}с)")
     
     if not discord_client or not discord_client.is_ready():
         logger.error("❌ Discord не готов, периодическая проверка не запустится")
@@ -845,7 +890,8 @@ async def periodic_stock_check(application: Application):
     
     try:
         initial_sleep = calculate_sleep_time()
-        logger.info(f"⏰ Первая проверка через {int(initial_sleep)}с ({get_next_check_time().strftime('%H:%M:%S')})")
+        next_check_time = get_next_check_time()
+        logger.info(f"⏰ Первая проверка через {int(initial_sleep)}с в {next_check_time.strftime('%H:%M:%S')}")
         await asyncio.sleep(initial_sleep)
 
         check_count = 0
@@ -853,7 +899,9 @@ async def periodic_stock_check(application: Application):
             try:
                 check_count += 1
                 now = get_moscow_time()
-                logger.info(f"🔍 Проверка #{check_count} - {now.strftime('%H:%M:%S')}")
+                logger.info("="*60)
+                logger.info(f"🔍 ПРОВЕРКА #{check_count} - {now.strftime('%H:%M:%S')}")
+                logger.info("="*60)
                 
                 stock_data = await discord_client.fetch_stock_data()
                 if stock_data:
@@ -863,19 +911,28 @@ async def periodic_stock_check(application: Application):
                 
                 sleep_time = calculate_sleep_time()
                 next_time = get_next_check_time()
-                logger.info(f"💤 Следующая проверка в {next_time.strftime('%H:%M:%S')} (через {int(sleep_time)}с)")
+                logger.info(f"💤 Следующая проверка #{check_count + 1} в {next_time.strftime('%H:%M:%S')} (через {int(sleep_time)}с)")
+                logger.info("="*60)
                 await asyncio.sleep(sleep_time)
             except asyncio.CancelledError:
                 logger.info("⚠️ Периодическая проверка отменена")
                 break
             except Exception as e:
                 logger.error(f"❌ Ошибка проверки: {e}", exc_info=True)
+                logger.info("⏳ Повтор через 60 секунд...")
                 await asyncio.sleep(60)
     except asyncio.CancelledError:
         logger.info("⚠️ Периодическая проверка остановлена")
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка в периодической проверке: {e}", exc_info=True)
 
 async def post_init(application: Application):
-    asyncio.create_task(periodic_stock_check(application))
+    logger.info("🔧 post_init вызван")
+    # Запускаем периодическую проверку в фоне
+    check_task = asyncio.create_task(periodic_stock_check(application))
+    # Сохраняем задачу, чтобы она не была удалена сборщиком мусора
+    application.bot_data['check_task'] = check_task
+    logger.info("✅ Задача периодической проверки создана")
 
 # ========== MAIN ==========
 def main():
@@ -911,6 +968,9 @@ def main():
     telegram_app.post_shutdown = shutdown_callback
 
     async def run_both():
+        logger.info("🎬 Запуск обоих клиентов...")
+        
+        # Запускаем Discord
         discord_task = asyncio.create_task(discord_client.start(DISCORD_TOKEN))
         
         timeout = 30
@@ -925,6 +985,7 @@ def main():
         
         logger.info("✅ Discord готов к работе")
         
+        # Инициализируем и запускаем Telegram
         await telegram_app.initialize()
         await telegram_app.start()
         
@@ -942,14 +1003,22 @@ def main():
         logger.info(f"🌹 Редкие семена: {', '.join(RAREST_SEEDS)}")
         logger.info("="*60)
         
+        # Даем время на инициализацию
+        await asyncio.sleep(2)
+        logger.info("✅ Все системы запущены, ожидание работы...")
+        
         try:
             await discord_task
         except KeyboardInterrupt:
             logger.info("⚠️ Получен сигнал остановки")
+        except Exception as e:
+            logger.error(f"❌ Ошибка в discord_task: {e}")
         finally:
+            logger.info("🛑 Начинаем остановку...")
             await telegram_app.updater.stop()
             await telegram_app.stop()
             await telegram_app.shutdown()
+            logger.info("✅ Остановка завершена")
     
     try:
         asyncio.run(run_both())
