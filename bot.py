@@ -148,9 +148,9 @@ sent_rare_notifications: Set[str] = set()
 NAME_TO_ID: Dict[str, str] = {}
 ID_TO_NAME: Dict[str, str] = {}
 
-SEED_ITEMS_LIST = [(name, info) for name, info in sorted(ITEMS_DATA.items()) if info['category'] == 'seed']
-GEAR_ITEMS_LIST = [(name, info) for name, info in sorted(ITEMS_DATA.items()) if info['category'] == 'gear']
-EGG_ITEMS_LIST = [(name, info) for name, info in sorted(ITEMS_DATA.items()) if info['category'] == 'egg']
+SEED_ITEMS_LIST = []
+GEAR_ITEMS_LIST = []
+EGG_ITEMS_LIST = []
 
 telegram_app: Optional[Application] = None
 discord_client: Optional[discord.Client] = None
@@ -184,7 +184,8 @@ def calculate_sleep_time() -> float:
     return max((next_check - now).total_seconds(), 0)
 
 def build_item_id_mappings():
-    global NAME_TO_ID, ID_TO_NAME
+    global NAME_TO_ID, ID_TO_NAME, SEED_ITEMS_LIST, GEAR_ITEMS_LIST, EGG_ITEMS_LIST
+    
     for item_name in ITEMS_DATA.keys():
         hash_obj = hashlib.sha1(item_name.encode('utf-8'))
         hash_hex = hash_obj.hexdigest()[:8]
@@ -192,6 +193,11 @@ def build_item_id_mappings():
         safe_id = f"t_{category}_{hash_hex}"
         NAME_TO_ID[item_name] = safe_id
         ID_TO_NAME[safe_id] = item_name
+    
+    SEED_ITEMS_LIST = [(name, info) for name, info in sorted(ITEMS_DATA.items()) if info['category'] == 'seed']
+    GEAR_ITEMS_LIST = [(name, info) for name, info in sorted(ITEMS_DATA.items()) if info['category'] == 'gear']
+    EGG_ITEMS_LIST = [(name, info) for name, info in sorted(ITEMS_DATA.items()) if info['category'] == 'egg']
+    
     logger.info(f"✅ Построены маппинги: {len(NAME_TO_ID)} предметов")
 
 async def check_subscription(bot: Bot, user_id: int) -> bool:
@@ -470,15 +476,18 @@ class StockDiscordClient(discord.Client):
         intents = discord.Intents.default()
         intents.messages = True
         intents.message_content = True
+        intents.guilds = True
         super().__init__(intents=intents)
         self.stock_lock = asyncio.Lock()
     
     async def on_ready(self):
-        logger.info(f'✅ Discord: {self.user}')
+        logger.info(f'✅ Discord подключен: {self.user}')
         for channel_name, channel_id in DISCORD_CHANNELS.items():
             channel = self.get_channel(channel_id)
             if channel:
-                logger.info(f"✅ {channel_name}: {channel.name}")
+                logger.info(f"✅ Канал {channel_name}: {channel.name}")
+            else:
+                logger.warning(f"⚠️ Канал {channel_name} (ID: {channel_id}) не найден")
     
     async def fetch_stock_data(self) -> Dict:
         global cached_stock_data, cached_stock_time
@@ -516,7 +525,7 @@ class StockDiscordClient(discord.Client):
                                     stock_data[category].extend(parsed[category])
                                 break
                 except Exception as e:
-                    logger.error(f"❌ {channel_name}: {e}")
+                    logger.error(f"❌ Ошибка парсинга {channel_name}: {e}")
             
             cached_stock_data = stock_data
             cached_stock_time = now
@@ -540,7 +549,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     await update.effective_message.reply_text(
-        "👋 *GAG Stock Tracker*\n\n📊 /stock\n🔔 /autostock\n❓ /help",
+        "👋 *GAG Stock Tracker*\n\n📊 /stock - Текущий сток\n🔔 /autostock - Автостоки\n❓ /help - Помощь",
         parse_mode=ParseMode.MARKDOWN
     )
 
@@ -712,7 +721,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     await update.effective_message.reply_text(
-        "📚 *КОМАНДЫ*\n\n/start - Запуск бота\n/stock - Текущий сток\n/autostock - Настройка автостоков\n/help - Помощь\n\n⏰ Проверка: каждые 5 минут и 10 секунд",
+        "📚 *КОМАНДЫ*\n\n"
+        "/start - Запуск бота\n"
+        "/stock - Текущий сток\n"
+        "/autostock - Настройка автостоков\n"
+        "/help - Помощь\n\n"
+        "⏰ Проверка: каждые 5 минут и 10 секунд\n"
+        f"🌹 Редкие: {', '.join(RAREST_SEEDS)}",
         parse_mode=ParseMode.MARKDOWN
     )
 
@@ -762,7 +777,7 @@ async def post_init(application: Application):
 # ========== MAIN ==========
 def main():
     logger.info("="*60)
-    logger.info("🌱 GAG Stock Tracker Bot v3.1")
+    logger.info("🌱 GAG Stock Tracker Bot v3.2")
     logger.info("="*60)
 
     build_item_id_mappings()
