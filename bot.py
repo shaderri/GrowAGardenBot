@@ -36,7 +36,7 @@ DISCORD_CHANNELS = {
 
 CHECK_INTERVAL_MINUTES = 5
 CHECK_DELAY_SECONDS = 10
-RAREST_SEEDS = ["Crimson Thorn"]
+RAREST_SEEDS = ["Crimson Thorn", "Trinity Fruit"]
 
 if not BOT_TOKEN or not DISCORD_TOKEN:
     raise ValueError("BOT_TOKEN и DISCORD_TOKEN должны быть установлены!")
@@ -79,6 +79,7 @@ SEEDS_DATA = {
     "Elder Strawberry": {"emoji": "🍓", "price": "70M"},
     "Romanesco": {"emoji": "🥦", "price": "88M"},
     "Crimson Thorn": {"emoji": "🌹", "price": "10B"},
+    "Trinity Fruit": {"emoji": "🔱", "price": "100B"},
     "Broccoli": {"emoji": "🥦", "price": "600"},
     "Potato": {"emoji": "🥔", "price": "500"},
     "Cocomango": {"emoji": "🥥", "price": "5,000"},
@@ -142,6 +143,7 @@ user_autostocks_cache: Dict[int, Set[str]] = {}
 subscription_cache: Dict[int, tuple] = {}
 cached_stock_data: Optional[Dict] = None
 cached_stock_time: Optional[datetime] = None
+sent_rare_notifications: Set[str] = set()
 
 NAME_TO_ID: Dict[str, str] = {}
 ID_TO_NAME: Dict[str, str] = {}
@@ -232,9 +234,10 @@ class SupabaseDB:
             session = await self.get_session()
             data = {"user_id": user_id, "username": username, "first_name": first_name, "last_seen": datetime.now(pytz.UTC).isoformat()}
             headers = {**self.headers, "Prefer": "resolution=merge-duplicates"}
-            async with session.post(USERS_URL, json=data, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as response:
+            async with session.post(USERS_URL, json=data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 return response.status in [200, 201]
-        except:
+        except Exception as e:
+            logger.error(f"❌ Сохранение пользователя: {e}")
             return False
     
     async def load_user_autostocks(self, user_id: int) -> Set[str]:
@@ -244,7 +247,7 @@ class SupabaseDB:
         try:
             session = await self.get_session()
             params = {"user_id": f"eq.{user_id}", "select": "item_name"}
-            async with session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=3)) as response:
+            async with session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 if response.status == 200:
                     data = await response.json()
                     items_set = {item['item_name'] for item in data}
@@ -260,7 +263,7 @@ class SupabaseDB:
             session = await self.get_session()
             data = {"user_id": user_id, "item_name": item_name}
             headers = {**self.headers, "Prefer": "resolution=merge-duplicates"}
-            async with session.post(AUTOSTOCKS_URL, json=data, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as response:
+            async with session.post(AUTOSTOCKS_URL, json=data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 success = response.status in [200, 201]
                 if success:
                     if user_id not in user_autostocks_cache:
@@ -276,7 +279,7 @@ class SupabaseDB:
         try:
             session = await self.get_session()
             params = {"user_id": f"eq.{user_id}", "item_name": f"eq.{item_name}"}
-            async with session.delete(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=3)) as response:
+            async with session.delete(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 success = response.status in [200, 204]
                 if success:
                     if user_id in user_autostocks_cache:
@@ -291,12 +294,13 @@ class SupabaseDB:
         try:
             session = await self.get_session()
             params = {"item_name": f"eq.{item_name}", "select": "user_id"}
-            async with session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=3)) as response:
+            async with session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 if response.status == 200:
                     data = await response.json()
                     return [item['user_id'] for item in data]
                 return []
-        except:
+        except Exception as e:
+            logger.error(f"❌ Получение пользователей для {item_name}: {e}")
             return []
 
 # ========== DISCORD ПАРСЕР ==========
@@ -325,13 +329,13 @@ class DiscordStockParser:
         current_section = None
         for line in lines:
             line = line.strip()
-            if 'SEEDS STOCK' in line:
+            if 'SEEDS STOCK' in line.upper():
                 current_section = 'seeds'
-            elif 'GEAR STOCK' in line:
+            elif 'GEAR STOCK' in line.upper():
                 current_section = 'gear'
-            elif 'EGG STOCK' in line:
+            elif 'EGG STOCK' in line.upper():
                 current_section = 'eggs'
-            elif 'COSMETICS' in line:
+            elif 'COSMETICS' in line.upper():
                 current_section = None
             elif current_section and 'x' in line:
                 clean_line = re.sub(r'[^\w\s\-]', '', line)
@@ -386,8 +390,23 @@ class DiscordStockParser:
         except Exception as e:
             logger.error(f"❌ Ошибка отправки {user_id}: {e}")
     
+    async def send_rare_notification_to_channel(self, bot: Bot, item_name: str, count: int):
+        try:
+            item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "?"})
+            message = (
+                f"🚨 *РЕДКИЙ СТОК!* 🚨\n\n"
+                f"{item_info['emoji']} *{item_name}*\n"
+                f"📦 x{count}\n"
+                f"💰 {item_info['price']} ¢\n\n"
+                f"🕒 {format_moscow_time()}"
+            )
+            await bot.send_message(chat_id=CHANNEL_ID, text=message, parse_mode=ParseMode.MARKDOWN)
+            logger.info(f"🚨 Редкое уведомление в канал: {item_name} x{count}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка отправки редкого уведомления: {e}")
+    
     async def check_user_autostocks(self, stock_data: Dict, bot: Bot):
-        global last_autostock_notification
+        global last_autostock_notification, sent_rare_notifications
         if not stock_data:
             return
 
@@ -397,13 +416,29 @@ class DiscordStockParser:
                 if quantity > 0:
                     current_stock[item_name] = quantity
 
+        # Проверка редких семян для канала
+        for item_name in RAREST_SEEDS:
+            if item_name in current_stock:
+                notification_key = f"{item_name}_{current_stock[item_name]}"
+                if notification_key not in sent_rare_notifications:
+                    await self.send_rare_notification_to_channel(bot, item_name, current_stock[item_name])
+                    sent_rare_notifications.add(notification_key)
+        
+        # Очистка старых редких уведомлений
+        sent_rare_notifications_copy = sent_rare_notifications.copy()
+        for notification_key in sent_rare_notifications_copy:
+            item_name = notification_key.rsplit('_', 1)[0]
+            if item_name not in current_stock:
+                sent_rare_notifications.discard(notification_key)
+
+        # Проверка автостоков пользователей
         items_to_check = []
         now = get_moscow_time()
         for item_name in current_stock.keys():
             if item_name not in last_autostock_notification:
                 items_to_check.append(item_name)
             else:
-                if (now - last_autostock_notification[item_name]).total_seconds() >= 300:  # 5 минут
+                if (now - last_autostock_notification[item_name]).total_seconds() >= 300:
                     items_to_check.append(item_name)
         
         if not items_to_check:
@@ -432,7 +467,10 @@ parser = DiscordStockParser()
 # ========== DISCORD CLIENT ==========
 class StockDiscordClient(discord.Client):
     def __init__(self):
-        super().__init__()
+        intents = discord.Intents.default()
+        intents.messages = True
+        intents.message_content = True
+        super().__init__(intents=intents)
         self.stock_lock = asyncio.Lock()
     
     async def on_ready(self):
@@ -457,9 +495,10 @@ class StockDiscordClient(discord.Client):
                 try:
                     channel = self.get_channel(channel_id)
                     if not channel:
+                        logger.warning(f"⚠️ Канал {channel_name} не найден")
                         continue
                     
-                    async for msg in channel.history(limit=2):
+                    async for msg in channel.history(limit=5):
                         if msg.author.bot and ('Vulcan' in msg.author.name or 'Dawn' in msg.author.name):
                             content = ""
                             if msg.embeds:
@@ -481,6 +520,7 @@ class StockDiscordClient(discord.Client):
             
             cached_stock_data = stock_data
             cached_stock_time = now
+            logger.info(f"📦 Собрано: {len(stock_data['seeds'])} семян, {len(stock_data['gear'])} гиров, {len(stock_data['eggs'])} яиц, {len(stock_data['events'])} ивентов")
             return stock_data
 
 # ========== КОМАНДЫ ==========
@@ -672,7 +712,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     await update.effective_message.reply_text(
-        "📚 *КОМАНДЫ*\n\n/start\n/stock\n/autostock\n/help\n\n⏰ Проверка: каждые 5 минут",
+        "📚 *КОМАНДЫ*\n\n/start - Запуск бота\n/stock - Текущий сток\n/autostock - Настройка автостоков\n/help - Помощь\n\n⏰ Проверка: каждые 5 минут и 10 секунд",
         parse_mode=ParseMode.MARKDOWN
     )
 
@@ -687,7 +727,7 @@ async def periodic_stock_check(application: Application):
     
     try:
         initial_sleep = calculate_sleep_time()
-        logger.info(f"⏰ Первая проверка через {int(initial_sleep)}с")
+        logger.info(f"⏰ Первая проверка через {int(initial_sleep)}с ({get_next_check_time().strftime('%H:%M:%S')})")
         await asyncio.sleep(initial_sleep)
 
         check_count = 0
@@ -700,16 +740,21 @@ async def periodic_stock_check(application: Application):
                 stock_data = await discord_client.fetch_stock_data()
                 if stock_data:
                     await parser.check_user_autostocks(stock_data, application.bot)
+                else:
+                    logger.warning("⚠️ Нет данных о стоке")
                 
                 sleep_time = calculate_sleep_time()
+                next_time = get_next_check_time()
+                logger.info(f"💤 Следующая проверка в {next_time.strftime('%H:%M:%S')} (через {int(sleep_time)}с)")
                 await asyncio.sleep(sleep_time)
             except asyncio.CancelledError:
+                logger.info("⚠️ Периодическая проверка отменена")
                 break
             except Exception as e:
-                logger.error(f"❌ Ошибка: {e}")
+                logger.error(f"❌ Ошибка проверки: {e}")
                 await asyncio.sleep(60)
     except asyncio.CancelledError:
-        pass
+        logger.info("⚠️ Периодическая проверка остановлена")
 
 async def post_init(application: Application):
     asyncio.create_task(periodic_stock_check(application))
@@ -717,7 +762,7 @@ async def post_init(application: Application):
 # ========== MAIN ==========
 def main():
     logger.info("="*60)
-    logger.info("🌱 GAG Stock Tracker Bot v3.0")
+    logger.info("🌱 GAG Stock Tracker Bot v3.1")
     logger.info("="*60)
 
     build_item_id_mappings()
@@ -737,7 +782,7 @@ def main():
     telegram_app.post_init = post_init
 
     async def shutdown_callback(app: Application):
-        logger.info("🛑 Остановка")
+        logger.info("🛑 Остановка бота")
         if discord_client:
             await discord_client.close()
         if http_session and not http_session.closed:
@@ -748,22 +793,32 @@ def main():
     async def run_both():
         discord_task = asyncio.create_task(discord_client.start(DISCORD_TOKEN))
         
-        while not discord_client.is_ready():
+        timeout = 30
+        elapsed = 0
+        while not discord_client.is_ready() and elapsed < timeout:
             await asyncio.sleep(0.5)
+            elapsed += 0.5
         
-        logger.info("✅ Discord готов")
+        if not discord_client.is_ready():
+            logger.error("❌ Discord не смог подключиться за 30 секунд")
+            return
+        
+        logger.info("✅ Discord готов к работе")
         
         await telegram_app.initialize()
         await telegram_app.start()
         await telegram_app.updater.start_polling(allowed_updates=None, drop_pending_updates=True)
         
-        logger.info("🚀 Бот запущен!")
+        logger.info("🚀 Telegram бот запущен!")
+        logger.info("="*60)
+        logger.info(f"⏰ Интервал проверки: каждые {CHECK_INTERVAL_MINUTES} минут и {CHECK_DELAY_SECONDS} секунд")
+        logger.info(f"🌹 Редкие семена: {', '.join(RAREST_SEEDS)}")
         logger.info("="*60)
         
         try:
             await discord_task
         except KeyboardInterrupt:
-            pass
+            logger.info("⚠️ Получен сигнал остановки")
         finally:
             await telegram_app.updater.stop()
             await telegram_app.stop()
@@ -772,7 +827,9 @@ def main():
     try:
         asyncio.run(run_both())
     except KeyboardInterrupt:
-        logger.info("⚠️ Остановка")
+        logger.info("⚠️ Остановка по Ctrl+C")
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка: {e}")
 
 if __name__ == "__main__":
     main()
