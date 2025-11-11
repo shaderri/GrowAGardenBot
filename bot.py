@@ -593,7 +593,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     await update.effective_message.reply_text(
-        "👋 *GAG Stock Tracker*\n\n📊 /stock - Текущий сток\n🔔 /autostock - Автостоки\n❓ /help - Помощь",
+        "👋 *GAG Stock Tracker*\n\n"
+        "📊 /stock - Текущий сток\n"
+        "🔔 /autostock - Настройка автостоков\n"
+        "🚀 /startloop - Запустить авто-проверку\n"
+        "❓ /help - Все команды",
         parse_mode=ParseMode.MARKDOWN
     )
 
@@ -766,12 +770,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.effective_message.reply_text(
         "📚 *КОМАНДЫ*\n\n"
+        "👤 *Основные:*\n"
         "/start - Запуск бота\n"
         "/stock - Текущий сток\n"
-        "/autostock - Настройка автостоков\n"
-        "/test - Тестовая проверка\n"
+        "/autostock - Настройка автостоков\n\n"
+        "🔧 *Управление:*\n"
+        "/startloop - Запустить авто-проверку\n"
+        "/stoploop - Остановить авто-проверку\n"
+        "/status - Статус бота\n"
         "/checknow - Проверить сейчас\n"
-        "/help - Помощь\n\n"
+        "/test - Тестовая проверка\n\n"
         "⏰ Проверка: каждые 5 минут и 10 секунд\n"
         f"🌹 Редкие: {', '.join(RAREST_SEEDS)}",
         parse_mode=ParseMode.MARKDOWN
@@ -869,6 +877,92 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.effective_message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
+async def startloop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message or not update.effective_user:
+        return
+    
+    if not await check_subscription(context.bot, update.effective_user.id):
+        await update.effective_message.reply_text("🔒 Подпишитесь на канал", reply_markup=get_subscription_keyboard())
+        return
+    
+    # Проверяем, не запущена ли уже проверка
+    if 'check_task' in context.application.bot_data:
+        task = context.application.bot_data['check_task']
+        if not task.done():
+            await update.effective_message.reply_text(
+                "⚠️ *Периодическая проверка уже запущена!*\n\nИспользуйте /status для проверки статуса",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+    
+    # Проверяем Discord
+    if not discord_client or not discord_client.is_ready():
+        await update.effective_message.reply_text(
+            "❌ *Discord не подключен*\n\nПодождите немного и попробуйте снова",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    await update.effective_message.reply_text(
+        "🚀 *Запускаю периодическую проверку...*",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    try:
+        # Запускаем периодическую проверку
+        check_task = asyncio.create_task(periodic_stock_check(context.application))
+        context.application.bot_data['check_task'] = check_task
+        
+        next_check = get_next_check_time()
+        
+        await update.effective_message.reply_text(
+            f"✅ *Периодическая проверка запущена!*\n\n"
+            f"⏰ Интервал: каждые {CHECK_INTERVAL_MINUTES} минут и {CHECK_DELAY_SECONDS} секунд\n"
+            f"🕒 Первая проверка: {next_check.strftime('%H:%M:%S')}\n"
+            f"🌹 Редкие семена: {', '.join(RAREST_SEEDS)}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        logger.info(f"✅ Периодическая проверка запущена вручную пользователем {update.effective_user.id}")
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка запуска периодической проверки: {e}")
+        await update.effective_message.reply_text(
+            f"❌ *Ошибка запуска:* `{str(e)}`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+async def stoploop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message or not update.effective_user:
+        return
+    
+    if not await check_subscription(context.bot, update.effective_user.id):
+        await update.effective_message.reply_text("🔒 Подпишитесь на канал", reply_markup=get_subscription_keyboard())
+        return
+    
+    if 'check_task' not in context.application.bot_data:
+        await update.effective_message.reply_text(
+            "⚠️ *Периодическая проверка не запущена*",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    task = context.application.bot_data['check_task']
+    if task.done():
+        await update.effective_message.reply_text(
+            "⚠️ *Периодическая проверка уже остановлена*",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    task.cancel()
+    await update.effective_message.reply_text(
+        "🛑 *Периодическая проверка остановлена*",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    logger.info(f"🛑 Периодическая проверка остановлена пользователем {update.effective_user.id}")
+
 # ========== ПЕРИОДИЧЕСКАЯ ПРОВЕРКА ==========
 async def periodic_stock_check(application: Application):
     logger.info("🚀 Периодическая проверка запущена")
@@ -928,11 +1022,8 @@ async def periodic_stock_check(application: Application):
 
 async def post_init(application: Application):
     logger.info("🔧 post_init вызван")
-    # Запускаем периодическую проверку в фоне
-    check_task = asyncio.create_task(periodic_stock_check(application))
-    # Сохраняем задачу, чтобы она не была удалена сборщиком мусора
-    application.bot_data['check_task'] = check_task
-    logger.info("✅ Задача периодической проверки создана")
+    # НЕ запускаем автоматически - только по команде /startloop
+    logger.info("ℹ️ Используйте /startloop для запуска периодической проверки")
 
 # ========== MAIN ==========
 def main():
@@ -953,6 +1044,9 @@ def main():
     telegram_app.add_handler(CommandHandler("autostock", autostock_command))
     telegram_app.add_handler(CommandHandler("test", test_command))
     telegram_app.add_handler(CommandHandler("checknow", check_now_command))
+    telegram_app.add_handler(CommandHandler("status", status_command))
+    telegram_app.add_handler(CommandHandler("startloop", startloop_command))
+    telegram_app.add_handler(CommandHandler("stoploop", stoploop_command))
     telegram_app.add_handler(CommandHandler("help", help_command))
     telegram_app.add_handler(CallbackQueryHandler(autostock_callback))
 
@@ -1001,6 +1095,8 @@ def main():
         logger.info("="*60)
         logger.info(f"⏰ Интервал проверки: каждые {CHECK_INTERVAL_MINUTES} минут и {CHECK_DELAY_SECONDS} секунд")
         logger.info(f"🌹 Редкие семена: {', '.join(RAREST_SEEDS)}")
+        logger.info("="*60)
+        logger.info("⚠️ ВАЖНО: Используйте команду /startloop для запуска автоматической проверки!")
         logger.info("="*60)
         
         # Даем время на инициализацию
