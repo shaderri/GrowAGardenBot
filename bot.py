@@ -23,20 +23,22 @@ CHANNEL_ID = os.getenv("CHANNEL_ID", "@GroowAGarden")
 CHANNEL_USERNAME = "GroowAGarden"
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://tcsmfiixhflzrxkrbslk.supabase.co")
-SUPABASE_API_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjc21maWl4aGZsenJ4a3Jic2xrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MDUzOTYsImV4cCI6MjA3NjA4MTM5Nn0.VcAK7QYvUFuKd96OgOdadS2s_9N08pYt9mMIu73Jeiw")
+SUPABASE_API_KEY = os.getenv("SUPABASE_KEY", "")
 
 AUTOSTOCKS_URL = f"{SUPABASE_URL}/rest/v1/user_autostocks"
 USERS_URL = f"{SUPABASE_URL}/rest/v1/users"
 
+# Новые каналы Discord
 DISCORD_CHANNELS = {
-    "stock": 1373218015042207804,
-    "egg_stock": 1373218102313091072,
-    "event_content": 1396257564311949503,
+    "stock": 1376781142291648653,  # seed-gear-stocks
+    "egg_stock": 1376606304189022349,  # egg-stocks
+    "cosmetics": 1376606377983610972,  # cosmetics
+    "weather": 1376606338762801373,  # weather
 }
 
 CHECK_INTERVAL_MINUTES = 5
 CHECK_DELAY_SECONDS = 10
-RAREST_SEEDS = ["Crimson Thorn", "Trinity Fruit"]
+RAREST_SEEDS = ["Crimson Thorn", "Zebrazinkle"]
 
 if not BOT_TOKEN or not DISCORD_TOKEN:
     raise ValueError("BOT_TOKEN и DISCORD_TOKEN должны быть установлены!")
@@ -55,7 +57,7 @@ SEEDS_DATA = {
     "Carrot": {"emoji": "🥕", "price": "10"},
     "Strawberry": {"emoji": "🍓", "price": "50"},
     "Blueberry": {"emoji": "🫐", "price": "400"},
-    "Orange Tulip": {"emoji": "🧡", "price": "600"},
+    "Buttercup": {"emoji": "🌼", "price": "600"},
     "Tomato": {"emoji": "🍅", "price": "800"},
     "Corn": {"emoji": "🌽", "price": "1,300"},
     "Daffodil": {"emoji": "🌼", "price": "1,000"},
@@ -71,6 +73,7 @@ SEEDS_DATA = {
     "Mushroom": {"emoji": "🍄", "price": "150,000"},
     "Pepper": {"emoji": "🌶️", "price": "1M"},
     "Cacao": {"emoji": "🍫", "price": "2.5M"},
+    "Sunflower": {"emoji": "🌻", "price": "5.56M"},
     "Beanstalk": {"emoji": "🪜", "price": "10M"},
     "Ember Lily": {"emoji": "🔥", "price": "15M"},
     "Sugar Apple": {"emoji": "🍎", "price": "25M"},
@@ -79,10 +82,8 @@ SEEDS_DATA = {
     "Elder Strawberry": {"emoji": "🍓", "price": "70M"},
     "Romanesco": {"emoji": "🥦", "price": "88M"},
     "Crimson Thorn": {"emoji": "🌹", "price": "10B"},
-    "Trinity Fruit": {"emoji": "🔱", "price": "100B"},
+    "Zebrazinkle": {"emoji": "🦓", "price": "21B"},
     "Broccoli": {"emoji": "🥦", "price": "600"},
-    "Potato": {"emoji": "🥔", "price": "500"},
-    "Cocomango": {"emoji": "🥥", "price": "5,000"},
 }
 
 GEAR_DATA = {
@@ -104,7 +105,6 @@ GEAR_DATA = {
     "Level Up Lollipop": {"emoji": "🍭", "price": "10B"},
     "Grandmaster Sprinkler": {"emoji": "🏆", "price": "1B"},
     "Pet Name Reroller": {"emoji": "🎲", "price": "5M"},
-    "Cleansing Pet Shard": {"emoji": "✨", "price": "3M"},
 }
 
 EGGS_DATA = {
@@ -117,24 +117,23 @@ EGGS_DATA = {
     "Jungle Egg": {"emoji": "🦜", "price": "60M"},
 }
 
-EVENT_DATA = {
-    "Orange Delight": {"emoji": "🍊", "price": "149", "category": "event"},
-    "Explorer's Compass": {"emoji": "🧭", "price": "179", "category": "event"},
-    "Safari Crate": {"emoji": "📦", "price": "179", "category": "event"},
-    "Zebra Whistle": {"emoji": "🦓", "price": "179", "category": "event"},
-    "Safari Egg": {"emoji": "🥚", "price": "149", "category": "event"},
-    "Protea": {"emoji": "🌺", "price": "479", "category": "event"},
-    "Lush Sprinkler": {"emoji": "💦", "price": "299", "category": "event"},
-    "Mini Shipping Container": {"emoji": "🚢", "price": "179", "category": "event"},
-    "Safari Totem Charm": {"emoji": "🗿", "price": "339", "category": "event"},
-    "Baobab": {"emoji": "🌳", "price": "799", "category": "event"},
+COSMETICS_DATA = {
+    "Beach Crate": {"emoji": "📦", "price": "?"},
+    "Summer Fun Crate": {"emoji": "📦", "price": "?"},
+    "Cooking Kit": {"emoji": "🍳", "price": "?"},
+    "Stone Lantern": {"emoji": "🏮", "price": "?"},
+    "Viney Beam": {"emoji": "🌿", "price": "?"},
+    "Hay Bale": {"emoji": "🌾", "price": "?"},
+    "Brick Stack": {"emoji": "🧱", "price": "?"},
+    "Torch": {"emoji": "🔥", "price": "?"},
+    "White Bench": {"emoji": "🪑", "price": "?"},
 }
 
 ITEMS_DATA = {}
 ITEMS_DATA.update({k: {**v, "category": "seed"} for k, v in SEEDS_DATA.items()})
 ITEMS_DATA.update({k: {**v, "category": "gear"} for k, v in GEAR_DATA.items()})
 ITEMS_DATA.update({k: {**v, "category": "egg"} for k, v in EGGS_DATA.items()})
-ITEMS_DATA.update(EVENT_DATA)
+ITEMS_DATA.update({k: {**v, "category": "cosmetic"} for k, v in COSMETICS_DATA.items()})
 
 # ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
 last_stock_state: Dict[str, int] = {}
@@ -143,14 +142,17 @@ user_autostocks_cache: Dict[int, Set[str]] = {}
 subscription_cache: Dict[int, tuple] = {}
 cached_stock_data: Optional[Dict] = None
 cached_stock_time: Optional[datetime] = None
-sent_rare_notifications: Set[str] = set()
+cached_weather_data: Optional[str] = None
+cached_weather_time: Optional[datetime] = None
+cached_cosmetics_data: Optional[Dict] = None
+cached_cosmetics_time: Optional[datetime] = None
 
 NAME_TO_ID: Dict[str, str] = {}
 ID_TO_NAME: Dict[str, str] = {}
 
-SEED_ITEMS_LIST = []
-GEAR_ITEMS_LIST = []
-EGG_ITEMS_LIST = []
+SEED_ITEMS_LIST = [(name, info) for name, info in sorted(ITEMS_DATA.items()) if info['category'] == 'seed']
+GEAR_ITEMS_LIST = [(name, info) for name, info in sorted(ITEMS_DATA.items()) if info['category'] == 'gear']
+EGG_ITEMS_LIST = [(name, info) for name, info in sorted(ITEMS_DATA.items()) if info['category'] == 'egg']
 
 telegram_app: Optional[Application] = None
 discord_client: Optional[discord.Client] = None
@@ -184,8 +186,7 @@ def calculate_sleep_time() -> float:
     return max((next_check - now).total_seconds(), 0)
 
 def build_item_id_mappings():
-    global NAME_TO_ID, ID_TO_NAME, SEED_ITEMS_LIST, GEAR_ITEMS_LIST, EGG_ITEMS_LIST
-    
+    global NAME_TO_ID, ID_TO_NAME
     for item_name in ITEMS_DATA.keys():
         hash_obj = hashlib.sha1(item_name.encode('utf-8'))
         hash_hex = hash_obj.hexdigest()[:8]
@@ -193,11 +194,6 @@ def build_item_id_mappings():
         safe_id = f"t_{category}_{hash_hex}"
         NAME_TO_ID[item_name] = safe_id
         ID_TO_NAME[safe_id] = item_name
-    
-    SEED_ITEMS_LIST = [(name, info) for name, info in sorted(ITEMS_DATA.items()) if info['category'] == 'seed']
-    GEAR_ITEMS_LIST = [(name, info) for name, info in sorted(ITEMS_DATA.items()) if info['category'] == 'gear']
-    EGG_ITEMS_LIST = [(name, info) for name, info in sorted(ITEMS_DATA.items()) if info['category'] == 'egg']
-    
     logger.info(f"✅ Построены маппинги: {len(NAME_TO_ID)} предметов")
 
 async def check_subscription(bot: Bot, user_id: int) -> bool:
@@ -240,10 +236,9 @@ class SupabaseDB:
             session = await self.get_session()
             data = {"user_id": user_id, "username": username, "first_name": first_name, "last_seen": datetime.now(pytz.UTC).isoformat()}
             headers = {**self.headers, "Prefer": "resolution=merge-duplicates"}
-            async with session.post(USERS_URL, json=data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
+            async with session.post(USERS_URL, json=data, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as response:
                 return response.status in [200, 201]
-        except Exception as e:
-            logger.error(f"❌ Сохранение пользователя: {e}")
+        except:
             return False
     
     async def load_user_autostocks(self, user_id: int) -> Set[str]:
@@ -253,7 +248,7 @@ class SupabaseDB:
         try:
             session = await self.get_session()
             params = {"user_id": f"eq.{user_id}", "select": "item_name"}
-            async with session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=5)) as response:
+            async with session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=3)) as response:
                 if response.status == 200:
                     data = await response.json()
                     items_set = {item['item_name'] for item in data}
@@ -261,7 +256,7 @@ class SupabaseDB:
                     return items_set
                 return set()
         except Exception as e:
-            logger.error(f"❌ Загрузка автостоков: {e}")
+            logger.error(f"❌ Загрузка: {e}")
             return user_autostocks_cache.get(user_id, set()).copy()
     
     async def save_user_autostock(self, user_id: int, item_name: str) -> bool:
@@ -269,7 +264,7 @@ class SupabaseDB:
             session = await self.get_session()
             data = {"user_id": user_id, "item_name": item_name}
             headers = {**self.headers, "Prefer": "resolution=merge-duplicates"}
-            async with session.post(AUTOSTOCKS_URL, json=data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
+            async with session.post(AUTOSTOCKS_URL, json=data, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as response:
                 success = response.status in [200, 201]
                 if success:
                     if user_id not in user_autostocks_cache:
@@ -285,7 +280,7 @@ class SupabaseDB:
         try:
             session = await self.get_session()
             params = {"user_id": f"eq.{user_id}", "item_name": f"eq.{item_name}"}
-            async with session.delete(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=5)) as response:
+            async with session.delete(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=3)) as response:
                 success = response.status in [200, 204]
                 if success:
                     if user_id in user_autostocks_cache:
@@ -300,18 +295,12 @@ class SupabaseDB:
         try:
             session = await self.get_session()
             params = {"item_name": f"eq.{item_name}", "select": "user_id"}
-            logger.debug(f"🔍 Запрос пользователей для: {item_name}")
-            async with session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=5)) as response:
+            async with session.get(AUTOSTOCKS_URL, headers=self.headers, params=params, timeout=aiohttp.ClientTimeout(total=3)) as response:
                 if response.status == 200:
                     data = await response.json()
-                    user_ids = [item['user_id'] for item in data]
-                    logger.debug(f"✅ Найдено {len(user_ids)} пользователей для {item_name}: {user_ids}")
-                    return user_ids
-                else:
-                    logger.warning(f"⚠️ Статус {response.status} для {item_name}")
+                    return [item['user_id'] for item in data]
                 return []
-        except Exception as e:
-            logger.error(f"❌ Получение пользователей для {item_name}: {e}")
+        except:
             return []
 
 # ========== DISCORD ПАРСЕР ==========
@@ -321,41 +310,37 @@ class DiscordStockParser:
         self.telegram_bot: Optional[Bot] = None
     
     def parse_stock_message(self, content: str, channel_name: str) -> Dict:
-        result = {"seeds": [], "gear": [], "eggs": [], "events": []}
+        result = {"seeds": [], "gear": [], "eggs": [], "cosmetics": []}
         lines = content.split('\n')
-        
-        logger.debug(f"🔍 Парсинг канала {channel_name}, строк: {len(lines)}")
-        
-        if channel_name == "event_content":
-            for line in lines:
-                line = line.strip()
-                if 'x' in line and not any(skip in line.lower() for skip in ['shop', 'stock', 'safari', 'updated', 'limited', 'today']):
-                    clean_line = re.sub(r'[•\*\-]', '', line)
-                    match = re.search(r'([A-Za-z\s\'\-]+?)\s+(\d+)x', clean_line)
-                    if match:
-                        item_name = match.group(1).strip()
-                        quantity = int(match.group(2))
-                        if quantity > 0 and item_name in EVENT_DATA:
-                            result['events'].append((item_name, quantity))
-                            logger.debug(f"✅ Найден event: {item_name} x{quantity}")
-            return result
         
         current_section = None
         for line in lines:
             line = line.strip()
-            if 'SEEDS STOCK' in line.upper():
-                current_section = 'seeds'
-                logger.debug("📍 Секция: SEEDS")
-            elif 'GEAR STOCK' in line.upper():
-                current_section = 'gear'
-                logger.debug("📍 Секция: GEAR")
-            elif 'EGG STOCK' in line.upper():
+            
+            # Для stock канала (семена + гиры)
+            if channel_name == "stock":
+                if 'Seeds' in line or 'SEEDS' in line:
+                    current_section = 'seeds'
+                    continue
+                elif 'Gear' in line or 'GEAR' in line:
+                    current_section = 'gear'
+                    continue
+            
+            # Для egg_stock
+            elif channel_name == "egg_stock":
                 current_section = 'eggs'
-                logger.debug("📍 Секция: EGGS")
-            elif 'COSMETICS' in line.upper():
-                current_section = None
-                logger.debug("📍 Секция: COSMETICS (пропуск)")
-            elif current_section and 'x' in line:
+            
+            # Для cosmetics
+            elif channel_name == "cosmetics":
+                if 'Crates:' in line:
+                    current_section = 'cosmetics'
+                    continue
+                elif 'Items:' in line:
+                    current_section = 'cosmetics'
+                    continue
+            
+            # Парсинг предметов
+            if current_section and 'x' in line:
                 clean_line = re.sub(r'[^\w\s\-]', '', line)
                 match = re.search(r'([A-Za-z\s\-]+)\s*x(\d+)', clean_line)
                 if match:
@@ -363,19 +348,16 @@ class DiscordStockParser:
                     quantity = int(match.group(2))
                     if quantity > 0:
                         result[current_section].append((item_name, quantity))
-                        logger.debug(f"✅ Найден {current_section}: {item_name} x{quantity}")
         
-        total = len(result['seeds']) + len(result['gear']) + len(result['eggs']) + len(result['events'])
-        logger.info(f"📦 Парсинг завершен: {total} предметов")
         return result
     
     def format_stock_message(self, stock_data: Dict) -> str:
         if not stock_data:
-            return "❌ *Не удалось получить данные о стоке*"
+            return "❌ *Не удалось получить данные*"
         
         message = "📊 *ТЕКУЩИЙ СТОК*\n\n"
         
-        for category, emoji, title in [('seeds', '🌱', 'СЕМЕНА'), ('gear', '⚔️', 'ГИРЫ'), ('eggs', '🥚', 'ЯЙЦА'), ('events', '🌴', 'SAFARI SHOP')]:
+        for category, emoji, title in [('seeds', '🌱', 'СЕМЕНА'), ('gear', '⚔️', 'ГИРЫ'), ('eggs', '🥚', 'ЯЙЦА')]:
             items = stock_data.get(category, [])
             if items:
                 message += f"{emoji} *{title}:*\n"
@@ -384,61 +366,51 @@ class DiscordStockParser:
                         item_info = SEEDS_DATA.get(item_name, {"emoji": emoji, "price": "?"})
                     elif category == 'gear':
                         item_info = GEAR_DATA.get(item_name, {"emoji": "⚔️", "price": "?"})
-                    elif category == 'eggs':
-                        item_info = EGGS_DATA.get(item_name, {"emoji": "🥚", "price": "?"})
                     else:
-                        item_info = EVENT_DATA.get(item_name, {"emoji": "📦", "price": "?"})
+                        item_info = EGGS_DATA.get(item_name, {"emoji": "🥚", "price": "?"})
                     message += f"{item_info['emoji']} {item_name} x{quantity}\n"
                 message += "\n"
             else:
                 message += f"{emoji} *{title}:* _Пусто_\n\n"
         
-        message += f"🕒 {format_moscow_time()} МСК"
+        message += f"🕒 {format_moscow_time()}"
+        return message
+    
+    def format_cosmetics_message(self, cosmetics_data: Dict) -> str:
+        if not cosmetics_data:
+            return "❌ *Не удалось получить данные*"
+        
+        message = "👗 *COSMETICS SHOP*\n\n"
+        items = cosmetics_data.get('cosmetics', [])
+        
+        if items:
+            for item_name, quantity in items:
+                item_info = COSMETICS_DATA.get(item_name, {"emoji": "📦", "price": "?"})
+                message += f"{item_info['emoji']} {item_name} x{quantity}\n"
+        else:
+            message += "_Пусто_"
+        
+        message += f"\n\n🕒 {format_moscow_time()}"
         return message
     
     async def send_autostock_notification(self, bot: Bot, user_id: int, item_name: str, count: int):
         try:
-            item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "?", "category": "item"})
-            category_emoji = {
-                "seed": "🌱",
-                "gear": "⚔️",
-                "egg": "🥚",
-                "event": "🌴"
-            }.get(item_info.get('category', 'item'), "📦")
-            
-            message = (
-                f"🔔 *АВТОСТОК ОБНОВЛЕН*\n\n"
-                f"{item_info['emoji']} *{item_name}*\n"
-                f"{category_emoji} Категория: {item_info.get('category', 'предмет').title()}\n"
-                f"📦 Количество: *{count} шт*\n"
-                f"💰 Цена: *{item_info['price']}* ¢\n\n"
-                f"⏰ {format_moscow_time()} МСК"
-            )
-            await bot.send_message(chat_id=user_id, text=message, parse_mode=ParseMode.MARKDOWN)
-            logger.info(f"📤 Уведомление: {user_id} -> {item_name}")
-        except Exception as e:
-            logger.error(f"❌ Ошибка отправки {user_id}: {e}")
-    
-    async def send_rare_notification_to_channel(self, bot: Bot, item_name: str, count: int):
-        try:
             item_info = ITEMS_DATA.get(item_name, {"emoji": "📦", "price": "?"})
             message = (
-                f"🚨 *РЕДКИЙ СТОК!* 🚨\n\n"
+                f"🔔 *АВТОСТОК*\n\n"
                 f"{item_info['emoji']} *{item_name}*\n"
-                f"📦 В наличии: *{count} шт*\n"
-                f"💰 Цена: *{item_info['price']}* ¢\n\n"
-                f"⚡️ Успей купить!\n"
-                f"⏰ {format_moscow_time()} МСК"
+                f"📦 x{count}\n"
+                f"💰 {item_info['price']} ¢\n\n"
+                f"🕒 {format_moscow_time()}"
             )
-            await bot.send_message(chat_id=CHANNEL_ID, text=message, parse_mode=ParseMode.MARKDOWN)
-            logger.info(f"🚨 Редкое уведомление в канал: {item_name} x{count}")
+            await bot.send_message(chat_id=user_id, text=message, parse_mode=ParseMode.MARKDOWN)
+            logger.info(f"📤 {user_id} -> {item_name}")
         except Exception as e:
-            logger.error(f"❌ Ошибка отправки редкого уведомления: {e}")
+            logger.error(f"❌ {user_id}: {e}")
     
     async def check_user_autostocks(self, stock_data: Dict, bot: Bot):
-        global last_autostock_notification, sent_rare_notifications
+        global last_autostock_notification
         if not stock_data:
-            logger.warning("⚠️ stock_data пустой")
             return
 
         current_stock = {}
@@ -446,75 +418,36 @@ class DiscordStockParser:
             for item_name, quantity in stock_data.get(stock_type, []):
                 if quantity > 0:
                     current_stock[item_name] = quantity
-        
-        logger.info(f"📦 Текущий сток: {list(current_stock.keys())}")
 
-        # Проверка редких семян для канала
-        for item_name in RAREST_SEEDS:
-            if item_name in current_stock:
-                notification_key = f"{item_name}_{current_stock[item_name]}"
-                if notification_key not in sent_rare_notifications:
-                    logger.info(f"🚨 Найдено редкое семя: {item_name} x{current_stock[item_name]}")
-                    await self.send_rare_notification_to_channel(bot, item_name, current_stock[item_name])
-                    sent_rare_notifications.add(notification_key)
-                else:
-                    logger.debug(f"🔕 Редкое семя {item_name} уже было отправлено")
-        
-        # Очистка старых редких уведомлений
-        sent_rare_notifications_copy = sent_rare_notifications.copy()
-        for notification_key in sent_rare_notifications_copy:
-            item_name = notification_key.rsplit('_', 1)[0]
-            if item_name not in current_stock:
-                sent_rare_notifications.discard(notification_key)
-                logger.info(f"🗑️ Очищено старое уведомление: {notification_key}")
-
-        # Проверка автостоков пользователей
         items_to_check = []
         now = get_moscow_time()
         for item_name in current_stock.keys():
             if item_name not in last_autostock_notification:
                 items_to_check.append(item_name)
-                logger.info(f"🆕 Новый предмет для проверки: {item_name}")
             else:
-                time_diff = (now - last_autostock_notification[item_name]).total_seconds()
-                if time_diff >= 300:
+                if (now - last_autostock_notification[item_name]).total_seconds() >= 300:
                     items_to_check.append(item_name)
-                    logger.info(f"⏰ Прошло {int(time_diff)}с для {item_name}, проверяем снова")
-                else:
-                    logger.debug(f"⏳ {item_name} проверялся {int(time_diff)}с назад, пропускаем")
         
         if not items_to_check:
-            logger.info("✅ Нет предметов для проверки автостоков")
             return
         
-        logger.info(f"🔍 Проверка автостоков: {items_to_check}")
+        logger.info(f"🔍 Проверка: {len(items_to_check)} предметов")
         
         tasks = [self.db.get_users_tracking_item(item_name) for item_name in items_to_check]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         send_count = 0
         for item_name, result in zip(items_to_check, results):
-            if isinstance(result, Exception):
-                logger.error(f"❌ Ошибка получения пользователей для {item_name}: {result}")
-                continue
-                
-            if result:
+            if not isinstance(result, Exception) and result:
                 count = current_stock[item_name]
-                logger.info(f"📨 {item_name}: найдено {len(result)} пользователей - {result}")
+                logger.info(f"📨 {item_name}: {len(result)} пользователей")
                 for user_id in result:
-                    try:
-                        asyncio.create_task(self.send_autostock_notification(bot, user_id, item_name, count))
-                        send_count += 1
-                    except Exception as e:
-                        logger.error(f"❌ Ошибка создания задачи для {user_id}: {e}")
+                    asyncio.create_task(self.send_autostock_notification(bot, user_id, item_name, count))
+                    send_count += 1
                 last_autostock_notification[item_name] = now
-            else:
-                logger.info(f"👤 {item_name}: нет пользователей, отслеживающих этот предмет")
         
         if send_count > 0:
             logger.info(f"✅ Отправлено {send_count} уведомлений")
-        else:
-            logger.info("ℹ️ Уведомления не отправлены - нет отслеживающих пользователей")
 
 parser = DiscordStockParser()
 
@@ -525,13 +458,11 @@ class StockDiscordClient(discord.Client):
         self.stock_lock = asyncio.Lock()
     
     async def on_ready(self):
-        logger.info(f'✅ Discord подключен: {self.user}')
+        logger.info(f'✅ Discord: {self.user}')
         for channel_name, channel_id in DISCORD_CHANNELS.items():
             channel = self.get_channel(channel_id)
             if channel:
-                logger.info(f"✅ Канал {channel_name}: {channel.name}")
-            else:
-                logger.warning(f"⚠️ Канал {channel_name} (ID: {channel_id}) не найден")
+                logger.info(f"✅ {channel_name}: {channel.name}")
     
     async def fetch_stock_data(self) -> Dict:
         global cached_stock_data, cached_stock_time
@@ -542,17 +473,19 @@ class StockDiscordClient(discord.Client):
                 return cached_stock_data
         
         async with self.stock_lock:
-            stock_data = {"seeds": [], "gear": [], "eggs": [], "events": []}
+            stock_data = {"seeds": [], "gear": [], "eggs": []}
             
-            for channel_name, channel_id in DISCORD_CHANNELS.items():
+            for channel_name in ["stock", "egg_stock"]:
+                if channel_name not in DISCORD_CHANNELS:
+                    continue
+                    
                 try:
-                    channel = self.get_channel(channel_id)
+                    channel = self.get_channel(DISCORD_CHANNELS[channel_name])
                     if not channel:
-                        logger.warning(f"⚠️ Канал {channel_name} не найден")
                         continue
                     
-                    async for msg in channel.history(limit=5):
-                        if msg.author.bot and ('Vulcan' in msg.author.name or 'Dawn' in msg.author.name):
+                    async for msg in channel.history(limit=2):
+                        if msg.author.bot and ('bot' in msg.author.name.lower() or 'Ember' in msg.author.name or 'Dawn' in msg.author.name):
                             content = ""
                             if msg.embeds:
                                 for embed in msg.embeds:
@@ -565,16 +498,82 @@ class StockDiscordClient(discord.Client):
                             
                             if content:
                                 parsed = parser.parse_stock_message(content, channel_name)
-                                for category in parsed:
+                                for category in ['seeds', 'gear', 'eggs']:
                                     stock_data[category].extend(parsed[category])
                                 break
                 except Exception as e:
-                    logger.error(f"❌ Ошибка парсинга {channel_name}: {e}")
+                    logger.error(f"❌ {channel_name}: {e}")
             
             cached_stock_data = stock_data
             cached_stock_time = now
-            logger.info(f"📦 Собрано: {len(stock_data['seeds'])} семян, {len(stock_data['gear'])} гиров, {len(stock_data['eggs'])} яиц, {len(stock_data['events'])} ивентов")
             return stock_data
+    
+    async def fetch_cosmetics_data(self) -> Dict:
+        global cached_cosmetics_data, cached_cosmetics_time
+        
+        now = get_moscow_time()
+        if cached_cosmetics_data and cached_cosmetics_time:
+            if (now - cached_cosmetics_time).total_seconds() < 60:
+                return cached_cosmetics_data
+        
+        try:
+            channel = self.get_channel(DISCORD_CHANNELS["cosmetics"])
+            if not channel:
+                return {"cosmetics": []}
+            
+            async for msg in channel.history(limit=5):
+                if msg.author.bot and 'resstock' in msg.content.lower():
+                    content = msg.content
+                    if msg.embeds and msg.embeds[0].description:
+                        content += "\n" + msg.embeds[0].description
+                    
+                    parsed = parser.parse_stock_message(content, "cosmetics")
+                    cached_cosmetics_data = parsed
+                    cached_cosmetics_time = now
+                    return parsed
+            
+            return {"cosmetics": []}
+        except Exception as e:
+            logger.error(f"❌ cosmetics: {e}")
+            return {"cosmetics": []}
+    
+    async def fetch_weather_data(self) -> str:
+        global cached_weather_data, cached_weather_time
+        
+        now = get_moscow_time()
+        if cached_weather_data and cached_weather_time:
+            if (now - cached_weather_time).total_seconds() < 60:
+                return cached_weather_data
+        
+        try:
+            channel = self.get_channel(DISCORD_CHANNELS["weather"])
+            if not channel:
+                return "❌ *Канал погоды недоступен*"
+            
+            message_text = "🌤️ *ТЕКУЩАЯ ПОГОДА*\n\n"
+            
+            async for msg in channel.history(limit=3):
+                if msg.author.bot:
+                    if msg.embeds:
+                        for embed in msg.embeds:
+                            if embed.title:
+                                message_text += f"*{embed.title}*\n"
+                            if embed.description:
+                                message_text += f"{embed.description}\n\n"
+                    elif msg.content:
+                        lines = msg.content.split('\n')
+                        for line in lines[:5]:
+                            if line.strip():
+                                message_text += f"{line}\n"
+                        message_text += "\n"
+            
+            message_text += f"🕒 {format_moscow_time()}"
+            cached_weather_data = message_text
+            cached_weather_time = now
+            return message_text
+        except Exception as e:
+            logger.error(f"❌ weather: {e}")
+            return f"❌ *Ошибка получения погоды*"
 
 # ========== КОМАНДЫ ==========
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -594,10 +593,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.effective_message.reply_text(
         "👋 *GAG Stock Tracker*\n\n"
-        "📊 /stock - Текущий сток\n"
-        "🔔 /autostock - Настройка автостоков\n"
-        "🚀 /startloop - Запустить авто-проверку\n"
-        "❓ /help - Все команды",
+        "📊 /stock - Сток (семена, гиры, яйца)\n"
+        "👗 /cosmetic - Косметика\n"
+        "🌤️ /weather - Погода\n"
+        "🔔 /autostock - Автостоки\n"
+        "❓ /help - Справка",
         parse_mode=ParseMode.MARKDOWN
     )
 
@@ -615,6 +615,37 @@ async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     stock_data = await discord_client.fetch_stock_data()
     message = parser.format_stock_message(stock_data)
+    await update.effective_message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+
+async def cosmetic_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message or not update.effective_user:
+        return
+    
+    if not await check_subscription(context.bot, update.effective_user.id):
+        await update.effective_message.reply_text("🔒 Подпишитесь на канал", reply_markup=get_subscription_keyboard())
+        return
+    
+    if not discord_client or not discord_client.is_ready():
+        await update.effective_message.reply_text("⚠️ *Discord загружается...*", parse_mode=ParseMode.MARKDOWN)
+        return
+    
+    cosmetics_data = await discord_client.fetch_cosmetics_data()
+    message = parser.format_cosmetics_message(cosmetics_data)
+    await update.effective_message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+
+async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_message or not update.effective_user:
+        return
+    
+    if not await check_subscription(context.bot, update.effective_user.id):
+        await update.effective_message.reply_text("🔒 Подпишитесь на канал", reply_markup=get_subscription_keyboard())
+        return
+    
+    if not discord_client or not discord_client.is_ready():
+        await update.effective_message.reply_text("⚠️ *Discord загружается...*", parse_mode=ParseMode.MARKDOWN)
+        return
+    
+    message = await discord_client.fetch_weather_data()
     await update.effective_message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
 async def autostock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -650,7 +681,7 @@ async def autostock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if data == "check_sub":
         subscription_cache.pop(user_id, None)
         if await check_subscription(context.bot, user_id):
-            await query.edit_message_text("✅ *Подписка подтверждена!*\n\n📊 /stock\n🔔 /autostock", parse_mode=ParseMode.MARKDOWN)
+            await query.edit_message_text("✅ *Подписка подтверждена!*\n\n📊 /stock\n👗 /cosmetic\n🌤️ /weather\n🔔 /autostock", parse_mode=ParseMode.MARKDOWN)
         else:
             await query.answer("❌ Вы не подписались", show_alert=True)
         return
@@ -770,222 +801,27 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.effective_message.reply_text(
         "📚 *КОМАНДЫ*\n\n"
-        "👤 *Основные:*\n"
-        "/start - Запуск бота\n"
-        "/stock - Текущий сток\n"
-        "/autostock - Настройка автостоков\n\n"
-        "🔧 *Управление:*\n"
-        "/startloop - Запустить авто-проверку\n"
-        "/stoploop - Остановить авто-проверку\n"
-        "/status - Статус бота\n"
-        "/checknow - Проверить сейчас\n"
-        "/test - Тестовая проверка\n\n"
-        "⏰ Проверка: каждые 5 минут и 10 секунд\n"
-        f"🌹 Редкие: {', '.join(RAREST_SEEDS)}",
+        "/stock - Сток\n"
+        "/cosmetic - Косметика\n"
+        "/weather - Погода\n"
+        "/autostock - Автостоки\n"
+        "/help - Справка\n\n"
+        "⏰ Проверка автостоков: каждые 5 минут",
         parse_mode=ParseMode.MARKDOWN
     )
-
-async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_message or not update.effective_user:
-        return
-    
-    if not await check_subscription(context.bot, update.effective_user.id):
-        await update.effective_message.reply_text("🔒 Подпишитесь на канал", reply_markup=get_subscription_keyboard())
-        return
-    
-    user_id = update.effective_user.id
-    
-    # Проверяем автостоки пользователя
-    user_items = await parser.db.load_user_autostocks(user_id)
-    
-    msg = f"🧪 *ТЕСТ АВТОСТОКОВ*\n\n"
-    msg += f"👤 User ID: `{user_id}`\n"
-    msg += f"📋 Отслеживаемых: {len(user_items)}\n\n"
-    
-    if user_items:
-        msg += "*Ваши автостоки:*\n"
-        for item in sorted(user_items):
-            msg += f"• {item}\n"
-    else:
-        msg += "_Нет автостоков_"
-    
-    await update.effective_message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-
-async def check_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_message or not update.effective_user:
-        return
-    
-    if not await check_subscription(context.bot, update.effective_user.id):
-        await update.effective_message.reply_text("🔒 Подпишитесь на канал", reply_markup=get_subscription_keyboard())
-        return
-    
-    if not discord_client or not discord_client.is_ready():
-        await update.effective_message.reply_text("⚠️ *Discord не готов*", parse_mode=ParseMode.MARKDOWN)
-        return
-    
-    await update.effective_message.reply_text("🔄 *Запускаю проверку...*", parse_mode=ParseMode.MARKDOWN)
-    
-    try:
-        stock_data = await discord_client.fetch_stock_data()
-        if stock_data:
-            await parser.check_user_autostocks(stock_data, context.bot)
-            
-            total = len(stock_data['seeds']) + len(stock_data['gear']) + len(stock_data['eggs'])
-            msg = f"✅ *Проверка завершена*\n\n📦 Найдено: {total} предметов\n"
-            msg += f"🌱 Семена: {len(stock_data['seeds'])}\n"
-            msg += f"⚔️ Гиры: {len(stock_data['gear'])}\n"
-            msg += f"🥚 Яйца: {len(stock_data['eggs'])}\n"
-            
-            await update.effective_message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-        else:
-            await update.effective_message.reply_text("❌ *Не удалось получить данные*", parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        logger.error(f"❌ Ошибка ручной проверки: {e}")
-        await update.effective_message.reply_text(f"❌ *Ошибка:* `{str(e)}`", parse_mode=ParseMode.MARKDOWN)
-
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_message or not update.effective_user:
-        return
-    
-    if not await check_subscription(context.bot, update.effective_user.id):
-        await update.effective_message.reply_text("🔒 Подпишитесь на канал", reply_markup=get_subscription_keyboard())
-        return
-    
-    discord_status = "✅ Подключен" if discord_client and discord_client.is_ready() else "❌ Не подключен"
-    
-    # Проверяем наличие задачи периодической проверки
-    check_task_status = "❓ Неизвестно"
-    if 'check_task' in context.application.bot_data:
-        task = context.application.bot_data['check_task']
-        if task.done():
-            check_task_status = "❌ Остановлена"
-        else:
-            check_task_status = "✅ Работает"
-    else:
-        check_task_status = "❌ Не создана"
-    
-    next_check = get_next_check_time()
-    
-    msg = (
-        f"📊 *СТАТУС БОТА*\n\n"
-        f"🤖 Discord: {discord_status}\n"
-        f"🔄 Периодическая проверка: {check_task_status}\n"
-        f"⏰ Следующая проверка: {next_check.strftime('%H:%M:%S')}\n"
-        f"📋 Пользователей в кеше: {len(user_autostocks_cache)}\n\n"
-        f"🕒 {format_moscow_time()} МСК"
-    )
-    
-    await update.effective_message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-
-async def startloop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_message or not update.effective_user:
-        return
-    
-    if not await check_subscription(context.bot, update.effective_user.id):
-        await update.effective_message.reply_text("🔒 Подпишитесь на канал", reply_markup=get_subscription_keyboard())
-        return
-    
-    # Проверяем, не запущена ли уже проверка
-    if 'check_task' in context.application.bot_data:
-        task = context.application.bot_data['check_task']
-        if not task.done():
-            await update.effective_message.reply_text(
-                "⚠️ *Периодическая проверка уже запущена!*\n\nИспользуйте /status для проверки статуса",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            return
-    
-    # Проверяем Discord
-    if not discord_client or not discord_client.is_ready():
-        await update.effective_message.reply_text(
-            "❌ *Discord не подключен*\n\nПодождите немного и попробуйте снова",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
-    
-    await update.effective_message.reply_text(
-        "🚀 *Запускаю периодическую проверку...*",
-        parse_mode=ParseMode.MARKDOWN
-    )
-    
-    try:
-        # Запускаем периодическую проверку
-        check_task = asyncio.create_task(periodic_stock_check(context.application))
-        context.application.bot_data['check_task'] = check_task
-        
-        next_check = get_next_check_time()
-        
-        await update.effective_message.reply_text(
-            f"✅ *Периодическая проверка запущена!*\n\n"
-            f"⏰ Интервал: каждые {CHECK_INTERVAL_MINUTES} минут и {CHECK_DELAY_SECONDS} секунд\n"
-            f"🕒 Первая проверка: {next_check.strftime('%H:%M:%S')}\n"
-            f"🌹 Редкие семена: {', '.join(RAREST_SEEDS)}",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        
-        logger.info(f"✅ Периодическая проверка запущена вручную пользователем {update.effective_user.id}")
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка запуска периодической проверки: {e}")
-        await update.effective_message.reply_text(
-            f"❌ *Ошибка запуска:* `{str(e)}`",
-            parse_mode=ParseMode.MARKDOWN
-        )
-
-async def stoploop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_message or not update.effective_user:
-        return
-    
-    if not await check_subscription(context.bot, update.effective_user.id):
-        await update.effective_message.reply_text("🔒 Подпишитесь на канал", reply_markup=get_subscription_keyboard())
-        return
-    
-    if 'check_task' not in context.application.bot_data:
-        await update.effective_message.reply_text(
-            "⚠️ *Периодическая проверка не запущена*",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
-    
-    task = context.application.bot_data['check_task']
-    if task.done():
-        await update.effective_message.reply_text(
-            "⚠️ *Периодическая проверка уже остановлена*",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
-    
-    task.cancel()
-    await update.effective_message.reply_text(
-        "🛑 *Периодическая проверка остановлена*",
-        parse_mode=ParseMode.MARKDOWN
-    )
-    
-    logger.info(f"🛑 Периодическая проверка остановлена пользователем {update.effective_user.id}")
 
 # ========== ПЕРИОДИЧЕСКАЯ ПРОВЕРКА ==========
 async def periodic_stock_check(application: Application):
     logger.info("🚀 Периодическая проверка запущена")
     
-    # Ждем пока Discord подключится
-    wait_time = 0
-    while (not discord_client or not discord_client.is_ready()) and wait_time < 60:
+    while not discord_client or not discord_client.is_ready():
         await asyncio.sleep(1)
-        wait_time += 1
-        if wait_time % 10 == 0:
-            logger.info(f"⏳ Ожидание Discord... ({wait_time}с)")
-    
-    if not discord_client or not discord_client.is_ready():
-        logger.error("❌ Discord не готов, периодическая проверка не запустится")
-        return
     
     parser.telegram_bot = application.bot
-    logger.info("✅ Периодическая проверка готова к работе")
     
     try:
         initial_sleep = calculate_sleep_time()
-        next_check_time = get_next_check_time()
-        logger.info(f"⏰ Первая проверка через {int(initial_sleep)}с в {next_check_time.strftime('%H:%M:%S')}")
+        logger.info(f"⏰ Первая проверка через {int(initial_sleep)}с")
         await asyncio.sleep(initial_sleep)
 
         check_count = 0
@@ -993,42 +829,29 @@ async def periodic_stock_check(application: Application):
             try:
                 check_count += 1
                 now = get_moscow_time()
-                logger.info("="*60)
-                logger.info(f"🔍 ПРОВЕРКА #{check_count} - {now.strftime('%H:%M:%S')}")
-                logger.info("="*60)
+                logger.info(f"🔍 Проверка #{check_count} - {now.strftime('%H:%M:%S')}")
                 
                 stock_data = await discord_client.fetch_stock_data()
                 if stock_data:
                     await parser.check_user_autostocks(stock_data, application.bot)
-                else:
-                    logger.warning("⚠️ Нет данных о стоке")
                 
                 sleep_time = calculate_sleep_time()
-                next_time = get_next_check_time()
-                logger.info(f"💤 Следующая проверка #{check_count + 1} в {next_time.strftime('%H:%M:%S')} (через {int(sleep_time)}с)")
-                logger.info("="*60)
                 await asyncio.sleep(sleep_time)
             except asyncio.CancelledError:
-                logger.info("⚠️ Периодическая проверка отменена")
                 break
             except Exception as e:
-                logger.error(f"❌ Ошибка проверки: {e}", exc_info=True)
-                logger.info("⏳ Повтор через 60 секунд...")
+                logger.error(f"❌ Ошибка: {e}")
                 await asyncio.sleep(60)
     except asyncio.CancelledError:
-        logger.info("⚠️ Периодическая проверка остановлена")
-    except Exception as e:
-        logger.error(f"❌ Критическая ошибка в периодической проверке: {e}", exc_info=True)
+        pass
 
 async def post_init(application: Application):
-    logger.info("🔧 post_init вызван")
-    # НЕ запускаем автоматически - только по команде /startloop
-    logger.info("ℹ️ Используйте /startloop для запуска периодической проверки")
+    asyncio.create_task(periodic_stock_check(application))
 
 # ========== MAIN ==========
 def main():
     logger.info("="*60)
-    logger.info("🌱 GAG Stock Tracker Bot v3.2")
+    logger.info("🌱 GAG Stock Tracker Bot v3.0 FINAL")
     logger.info("="*60)
 
     build_item_id_mappings()
@@ -1041,19 +864,16 @@ def main():
 
     telegram_app.add_handler(CommandHandler("start", start_command))
     telegram_app.add_handler(CommandHandler("stock", stock_command))
+    telegram_app.add_handler(CommandHandler("cosmetic", cosmetic_command))
+    telegram_app.add_handler(CommandHandler("weather", weather_command))
     telegram_app.add_handler(CommandHandler("autostock", autostock_command))
-    telegram_app.add_handler(CommandHandler("test", test_command))
-    telegram_app.add_handler(CommandHandler("checknow", check_now_command))
-    telegram_app.add_handler(CommandHandler("status", status_command))
-    telegram_app.add_handler(CommandHandler("startloop", startloop_command))
-    telegram_app.add_handler(CommandHandler("stoploop", stoploop_command))
     telegram_app.add_handler(CommandHandler("help", help_command))
     telegram_app.add_handler(CallbackQueryHandler(autostock_callback))
 
     telegram_app.post_init = post_init
 
     async def shutdown_callback(app: Application):
-        logger.info("🛑 Остановка бота")
+        logger.info("🛑 Остановка")
         if discord_client:
             await discord_client.close()
         if http_session and not http_session.closed:
@@ -1062,66 +882,33 @@ def main():
     telegram_app.post_shutdown = shutdown_callback
 
     async def run_both():
-        logger.info("🎬 Запуск обоих клиентов...")
-        
-        # Запускаем Discord
         discord_task = asyncio.create_task(discord_client.start(DISCORD_TOKEN))
         
-        timeout = 30
-        elapsed = 0
-        while not discord_client.is_ready() and elapsed < timeout:
+        while not discord_client.is_ready():
             await asyncio.sleep(0.5)
-            elapsed += 0.5
         
-        if not discord_client.is_ready():
-            logger.error("❌ Discord не смог подключиться за 30 секунд")
-            return
+        logger.info("✅ Discord готов")
         
-        logger.info("✅ Discord готов к работе")
-        
-        # Инициализируем и запускаем Telegram
         await telegram_app.initialize()
         await telegram_app.start()
+        await telegram_app.updater.start_polling(allowed_updates=None, drop_pending_updates=True)
         
-        # Важно: drop_pending_updates=True убирает конфликты
-        await telegram_app.updater.start_polling(
-            allowed_updates=None, 
-            drop_pending_updates=True,
-            poll_interval=1.0,
-            timeout=30
-        )
-        
-        logger.info("🚀 Telegram бот запущен!")
+        logger.info("🚀 Бот запущен!")
         logger.info("="*60)
-        logger.info(f"⏰ Интервал проверки: каждые {CHECK_INTERVAL_MINUTES} минут и {CHECK_DELAY_SECONDS} секунд")
-        logger.info(f"🌹 Редкие семена: {', '.join(RAREST_SEEDS)}")
-        logger.info("="*60)
-        logger.info("⚠️ ВАЖНО: Используйте команду /startloop для запуска автоматической проверки!")
-        logger.info("="*60)
-        
-        # Даем время на инициализацию
-        await asyncio.sleep(2)
-        logger.info("✅ Все системы запущены, ожидание работы...")
         
         try:
             await discord_task
         except KeyboardInterrupt:
-            logger.info("⚠️ Получен сигнал остановки")
-        except Exception as e:
-            logger.error(f"❌ Ошибка в discord_task: {e}")
+            pass
         finally:
-            logger.info("🛑 Начинаем остановку...")
             await telegram_app.updater.stop()
             await telegram_app.stop()
             await telegram_app.shutdown()
-            logger.info("✅ Остановка завершена")
     
     try:
         asyncio.run(run_both())
     except KeyboardInterrupt:
-        logger.info("⚠️ Остановка по Ctrl+C")
-    except Exception as e:
-        logger.error(f"❌ Критическая ошибка: {e}")
+        logger.info("⚠️ Остановка")
 
 if __name__ == "__main__":
     main()
