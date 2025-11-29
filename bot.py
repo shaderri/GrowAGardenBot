@@ -482,30 +482,54 @@ class StockDiscordClient(discord.Client):
                 try:
                     channel = self.get_channel(DISCORD_CHANNELS[channel_name])
                     if not channel:
+                        logger.warning(f"⚠️ Канал {channel_name} не найден")
                         continue
                     
-                    async for msg in channel.history(limit=2):
-                        if msg.author.bot and ('bot' in msg.author.name.lower() or 'Ember' in msg.author.name or 'Dawn' in msg.author.name):
+                    # Проверяем права доступа
+                    permissions = channel.permissions_for(channel.guild.me)
+                    if not permissions.read_messages or not permissions.read_message_history:
+                        logger.error(f"❌ Нет доступа к {channel_name}")
+                        continue
+                    
+                    async for msg in channel.history(limit=5):
+                        # Ищем сообщения от ботов с информацией о стоке
+                        if msg.author.bot:
                             content = ""
+                            
+                            # Проверяем embeds
                             if msg.embeds:
                                 for embed in msg.embeds:
-                                    if embed.description:
-                                        content += embed.description + "\n"
-                                    for field in embed.fields:
-                                        content += f"{field.name}\n{field.value}\n"
-                            if msg.content:
+                                    if embed.title and ('Stock' in embed.title or 'Shop' in embed.title):
+                                        if embed.description:
+                                            content += embed.description + "\n"
+                                        for field in embed.fields:
+                                            content += f"{field.name}\n{field.value}\n"
+                            
+                            # Проверяем обычное сообщение
+                            if msg.content and ('Stock' in msg.content or 'Grow a Garden' in msg.content):
                                 content += msg.content
                             
-                            if content:
+                            if content and ('x' in content or 'Seeds' in content or 'Gear' in content or 'Egg' in content):
                                 parsed = parser.parse_stock_message(content, channel_name)
                                 for category in ['seeds', 'gear', 'eggs']:
-                                    stock_data[category].extend(parsed[category])
-                                break
+                                    if parsed[category]:
+                                        stock_data[category].extend(parsed[category])
+                                
+                                if stock_data['seeds'] or stock_data['gear'] or stock_data['eggs']:
+                                    logger.info(f"✅ Спарсен {channel_name}")
+                                    break
+                    
+                except discord.errors.Forbidden as e:
+                    logger.error(f"❌ {channel_name}: Нет доступа к каналу. Проверьте права Discord аккаунта")
                 except Exception as e:
                     logger.error(f"❌ {channel_name}: {e}")
             
             cached_stock_data = stock_data
             cached_stock_time = now
+            
+            if not stock_data['seeds'] and not stock_data['gear'] and not stock_data['eggs']:
+                logger.warning("⚠️ Не удалось получить данные ни из одного канала")
+            
             return stock_data
     
     async def fetch_cosmetics_data(self) -> Dict:
@@ -521,8 +545,14 @@ class StockDiscordClient(discord.Client):
             if not channel:
                 return {"cosmetics": []}
             
-            async for msg in channel.history(limit=5):
-                if msg.author.bot and 'resstock' in msg.content.lower():
+            # Проверяем доступ
+            permissions = channel.permissions_for(channel.guild.me)
+            if not permissions.read_messages or not permissions.read_message_history:
+                logger.error("❌ Нет доступа к cosmetics")
+                return {"cosmetics": []}
+            
+            async for msg in channel.history(limit=10):
+                if msg.author.bot and ('resstock' in msg.content.lower() or 'Cosmetic' in msg.content):
                     content = msg.content
                     if msg.embeds and msg.embeds[0].description:
                         content += "\n" + msg.embeds[0].description
@@ -532,6 +562,9 @@ class StockDiscordClient(discord.Client):
                     cached_cosmetics_time = now
                     return parsed
             
+            return {"cosmetics": []}
+        except discord.errors.Forbidden:
+            logger.error("❌ cosmetics: Нет доступа")
             return {"cosmetics": []}
         except Exception as e:
             logger.error(f"❌ cosmetics: {e}")
@@ -550,27 +583,48 @@ class StockDiscordClient(discord.Client):
             if not channel:
                 return "❌ *Канал погоды недоступен*"
             
-            message_text = "🌤️ *ТЕКУЩАЯ ПОГОДА*\n\n"
+            # Проверяем доступ
+            permissions = channel.permissions_for(channel.guild.me)
+            if not permissions.read_messages or not permissions.read_message_history:
+                logger.error("❌ Нет доступа к weather")
+                return "❌ *Нет доступа к каналу погоды*"
             
-            async for msg in channel.history(limit=3):
+            message_text = "🌤️ *ТЕКУЩАЯ ПОГОДА*\n\n"
+            found = False
+            
+            async for msg in channel.history(limit=5):
                 if msg.author.bot:
                     if msg.embeds:
                         for embed in msg.embeds:
                             if embed.title:
                                 message_text += f"*{embed.title}*\n"
+                                found = True
                             if embed.description:
-                                message_text += f"{embed.description}\n\n"
-                    elif msg.content:
+                                # Очищаем описание от лишних символов
+                                desc = embed.description.replace('**', '*')
+                                message_text += f"{desc}\n\n"
+                                found = True
+                    elif msg.content and ('Rain' in msg.content or 'Wind' in msg.content or 'Storm' in msg.content or 'ENDED' in msg.content):
                         lines = msg.content.split('\n')
-                        for line in lines[:5]:
+                        for line in lines[:8]:
                             if line.strip():
                                 message_text += f"{line}\n"
                         message_text += "\n"
+                        found = True
+                    
+                    if found:
+                        break
             
-            message_text += f"🕒 {format_moscow_time()}"
+            if not found:
+                message_text += "_Нет активной погоды_\n"
+            
+            message_text += f"\n🕒 {format_moscow_time()}"
             cached_weather_data = message_text
             cached_weather_time = now
             return message_text
+        except discord.errors.Forbidden:
+            logger.error("❌ weather: Нет доступа")
+            return "❌ *Нет доступа к каналу погоды*"
         except Exception as e:
             logger.error(f"❌ weather: {e}")
             return f"❌ *Ошибка получения погоды*"
